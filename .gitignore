@@ -19,3 +19,10 @@ tests/recordings/not-a-recording.txt
 
 # Long-term memory
 memory.db
+
+# === Run artifacts / generated files ===
+transcripts/
+frame_start.json
+reset.json
+reset_full.json
+up_full.json
