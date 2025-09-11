@@ -2,7 +2,15 @@ import json
 import logging
 import os
 import textwrap
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
+import numpy as np
+import base64
+import io
+import hashlib   
+from PIL import Image, ImageDraw
+
 
 import openai
 from openai import OpenAI as OpenAIClient
@@ -23,7 +31,7 @@ class LLM(Agent):
 
     MESSAGE_LIMIT: int = 10
     MODEL: str = "gpt-4o-mini"
-    messages: list[dict[str, Any]]
+    messages: list[dict[str, Any] | Any]
     token_counter: int
 
     _latest_tool_call_id: str = "call_12345"
@@ -32,6 +40,11 @@ class LLM(Agent):
         super().__init__(*args, **kwargs)
         self.messages = []
         self.token_counter = 0
+        # transcript plumbing (GuidedLLM enables it)
+        self._transcript_enabled: bool = False
+        self._transcript_file = None
+        self._transcript_counter = 0
+        self._transcript_path: Optional[Path] = None
 
     @property
     def name(self) -> str:
@@ -65,9 +78,8 @@ class LLM(Agent):
         functions = self.build_functions()
         tools = self.build_tools()
 
-        # if latest_frame.state in [GameState.NOT_PLAYED]:
+        # First prompt: seed reset
         if len(self.messages) == 0:
-            # have to manually trigger the first reset to kick off agent
             user_prompt = self.build_user_prompt(latest_frame)
             message0 = {"role": "user", "content": user_prompt}
             self.push_message(message0)
@@ -91,11 +103,12 @@ class LLM(Agent):
                     "function_call": {"name": "RESET", "arguments": json.dumps({})},  # type: ignore
                 }
             self.push_message(message1)
+            # log the exact seed messages the next API call will see
+            self._log_seed_messages(self.messages)
             action = GameAction.RESET
             return action
 
-        # let the agent comment observations before choosing action
-        # on the first turn, this will be in response to RESET action
+        # Tool/function result back to the model as context
         function_name = latest_frame.action_input.id.name
         function_response = self.build_func_resp_prompt(latest_frame)
         if self.MODEL_REQUIRES_TOOLS:
@@ -112,19 +125,36 @@ class LLM(Agent):
             }
         self.push_message(message2)
 
+        # Optional observation turn
         if self.DO_OBSERVATION:
             logger.info("Sending to Assistant for observation...")
             try:
                 create_kwargs = {
                     "model": self.MODEL,
-                    "messages": self.messages,
+                    "messages": self._coerce_messages_for_wire(self.messages),
                 }
                 if self.REASONING_EFFORT is not None:
                     create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+
+                # Log exactly what the model conditions on (messages only here)
+                self._log_api_call(
+                    kind="observation",
+                    model=self.MODEL,
+                    messages=self.messages,
+                    tools=None,
+                    functions=None,
+                    tool_choice=None,
+                )
+
                 response = client.chat.completions.create(**create_kwargs)
+
+                # Log exactly what the model returned as a message
+                self._log_api_response(response)
+
             except openai.BadRequestError as e:
                 logger.info(f"Message dump: {self.messages}")
                 raise e
+
             self.track_tokens(
                 response.usage.total_tokens, response.choices[0].message.content
             )
@@ -135,7 +165,7 @@ class LLM(Agent):
             logger.info(f"Assistant: {response.choices[0].message.content}")
             self.push_message(message3)
 
-        # now ask for the next action
+        # Action turn (with tools/functions)
         user_prompt = self.build_user_prompt(latest_frame)
         message4 = {"role": "user", "content": user_prompt}
         self.push_message(message4)
@@ -149,16 +179,31 @@ class LLM(Agent):
             try:
                 create_kwargs = {
                     "model": self.MODEL,
-                    "messages": self.messages,
+                    "messages": self._coerce_messages_for_wire(self.messages),
                     "tools": tools,
                     "tool_choice": "required",
                 }
                 if self.REASONING_EFFORT is not None:
                     create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+
+                # Log messages + tool schema (both are tokenized by the model)
+                self._log_api_call(
+                    kind="action",
+                    model=self.MODEL,
+                    messages=self.messages,
+                    tools=tools,
+                    functions=None,
+                    tool_choice="required",
+                )
+
                 response = client.chat.completions.create(**create_kwargs)
+
+                self._log_api_response(response)
+
             except openai.BadRequestError as e:
                 logger.info(f"Message dump: {self.messages}")
                 raise e
+
             self.track_tokens(response.usage.total_tokens)
             message5 = response.choices[0].message
             logger.debug(f"... got response {message5}")
@@ -187,16 +232,31 @@ class LLM(Agent):
             try:
                 create_kwargs = {
                     "model": self.MODEL,
-                    "messages": self.messages,
+                    "messages": self._coerce_messages_for_wire(self.messages),
                     "functions": functions,
                     "function_call": "auto",
                 }
                 if self.REASONING_EFFORT is not None:
                     create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+
+                # Log messages + function schema (both are tokenized by the model)
+                self._log_api_call(
+                    kind="action",
+                    model=self.MODEL,
+                    messages=self.messages,
+                    tools=None,
+                    functions=functions,
+                    tool_choice=None,
+                )
+
                 response = client.chat.completions.create(**create_kwargs)
+
+                self._log_api_response(response)
+
             except openai.BadRequestError as e:
                 logger.info(f"Message dump: {self.messages}")
                 raise e
+
             self.track_tokens(response.usage.total_tokens)
             message5 = response.choices[0].message
             function_call = message5.function_call
@@ -205,7 +265,9 @@ class LLM(Agent):
             arguments = function_call.arguments
 
         if message5:
+            # Keep storing the SDK object as-is (don’t disrupt behavior)
             self.push_message(message5)
+
         action_id = name
         if arguments:
             try:
@@ -242,7 +304,7 @@ class LLM(Agent):
         #         indent=2,
         #     )
 
-    def push_message(self, message: dict[str, Any]) -> list[dict[str, Any]]:
+    def push_message(self, message: dict[str, Any] | Any) -> list[dict[str, Any] | Any]:
         """Push a message onto stack, store up to MESSAGE_LIMIT with FIFO."""
         self.messages.append(message)
         if len(self.messages) > self.MESSAGE_LIMIT:
@@ -250,12 +312,13 @@ class LLM(Agent):
         if self.MODEL_REQUIRES_TOOLS:
             # cant clip the message list between tool
             # and tool_call else llm will error
-            while (
-                self.messages[0].get("role")
-                if isinstance(self.messages[0], dict)
-                else getattr(self.messages[0], "role", None)
-            ) == "tool":
-                self.messages.pop(0)
+            while True:
+                first = self.messages[0]
+                role = first.get("role") if isinstance(first, dict) else getattr(first, "role", None)
+                if role == "tool":
+                    self.messages.pop(0)
+                else:
+                    break
         return self.messages
 
     def build_functions(self) -> list[dict[str, Any]]:
@@ -350,7 +413,7 @@ class LLM(Agent):
 {latest_frame}
 
 # TURN:
-Reply with a few sentences of plain-text strategy observation about the frame to inform your next action.
+Reply with a several sentences/ paragraphs of plain-text strategy observation about the frame to inform your next action.
         """.format(
                 latest_frame=self.pretty_print_3d(latest_frame.frame),
                 score=latest_frame.score,
@@ -397,7 +460,156 @@ Call exactly one action.
                     ),
                 }
                 self.recorder.record(meta)
+            # Final snapshot of the exact context as JSON array
+            self._log_final_context(self.messages)
+        # close transcript gracefully if open
+        self._close_transcript()
         super().cleanup(*args, **kwargs)
+
+    # Transcript helpers (exact wire-style JSON)
+
+    def _open_transcript(self) -> None:
+        """Open a streaming transcript file if enabled."""
+        if not self._transcript_enabled or self._transcript_file:
+            return
+        dir_path = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts"))
+        dir_path.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+        fname = f"{self.name}.{stamp}.transcript.txt"
+        self._transcript_path = dir_path / fname
+        self._transcript_file = open(self._transcript_path, "a", encoding="utf-8")
+        self._tw(f"# transcript opened {stamp}Z")
+
+    def _close_transcript(self) -> None:
+        if self._transcript_file:
+            self._tw("# end of transcript")
+            try:
+                self._transcript_file.flush()
+                self._transcript_file.close()
+            finally:
+                self._transcript_file = None
+
+    def _tw(self, s: str) -> None:
+        """Write a line to transcript and flush."""
+        if not self._transcript_file:
+            return
+        self._transcript_file.write(s if s.endswith("\n") else s + "\n")
+        self._transcript_file.flush()
+
+    def _coerce_message_to_dict(self, m: Any) -> dict[str, Any]:
+        """Turn dict or ChatCompletionMessage into a plain dict for JSON logging / wire."""
+        if isinstance(m, dict):
+            return m
+        # OpenAI SDK ChatCompletionMessage (or similar)
+        out: dict[str, Any] = {}
+        role = getattr(m, "role", None)
+        if role:
+            out["role"] = role
+        # top-level content
+        if hasattr(m, "content"):
+            out["content"] = m.content
+        # tool_calls
+        tc_list = getattr(m, "tool_calls", None)
+        if tc_list:
+            tcs: list[dict[str, Any]] = []
+            for tc in tc_list:
+                d = {
+                    "id": getattr(tc, "id", None),
+                    "type": getattr(tc, "type", "function"),
+                    "function": None,
+                }
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    d["function"] = {
+                        "name": getattr(fn, "name", None),
+                        "arguments": getattr(fn, "arguments", None),
+                    }
+                tcs.append(d)
+            out["tool_calls"] = tcs
+        # function_call (deprecated format)
+        fc = getattr(m, "function_call", None)
+        if fc is not None:
+            out["function_call"] = {
+                "name": getattr(fc, "name", None),
+                "arguments": getattr(fc, "arguments", None),
+            }
+        # name / tool_call_id if present on tool/function messages (rare on assistant objects)
+        name = getattr(m, "name", None)
+        if name:
+            out["name"] = name
+        tcid = getattr(m, "tool_call_id", None)
+        if tcid:
+            out["tool_call_id"] = tcid
+        return out
+
+    def _coerce_messages_for_wire(self, messages: list[dict[str, Any] | Any]) -> list[dict[str, Any]]:
+        """Return a list of plain dict messages suitable for API call / exact logging."""
+        return [self._coerce_message_to_dict(m) for m in messages]
+
+    def _render_wire_json(self, messages: list[dict[str, Any] | Any]) -> str:
+        """Render messages as exact JSON (what we send on the wire)."""
+        try:
+            coerced = self._coerce_messages_for_wire(messages)
+            return json.dumps(coerced, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return f'{{"error":"failed to render messages","detail":"{e}"}}'
+
+    def _log_seed_messages(self, messages: list[dict[str, Any] | Any]) -> None:
+        if not self._transcript_enabled:
+            return
+        self._open_transcript()
+        self._tw("=== INIT / SEEDED CONTEXT ===")
+        self._tw(self._render_wire_json(messages))
+
+    def _log_api_call(
+        self,
+        kind: str,  # "observation" | "action"
+        model: str,
+        messages: list[dict[str, Any] | Any],
+        tools: Optional[list[dict[str, Any]]] = None,
+        functions: Optional[list[dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+    ) -> None:
+        if not self._transcript_enabled:
+            return
+        self._open_transcript()
+        self._transcript_counter += 1
+        self._tw(f"\n=== PROMPT #{self._transcript_counter} [{kind}] model={model} ===")
+        # Messages (exact)
+        self._tw("messages:")
+        self._tw(self._render_wire_json(messages))
+        # Include tool/function schema verbatim (tokenized by the model)
+        if tools:
+            try:
+                self._tw("tools:")
+                self._tw(json.dumps(tools, ensure_ascii=False, indent=2))
+            except Exception as e:
+                self._tw(f'{{"error":"failed to render tools","detail":"{e}"}}')
+        if functions:
+            try:
+                self._tw("functions:")
+                self._tw(json.dumps(functions, ensure_ascii=False, indent=2))
+            except Exception as e:
+                self._tw(f'{{"error":"failed to render functions","detail":"{e}"}}')
+        # Note: tool_choice is not part of the tokenized context; omit on purpose.
+
+    def _log_api_response(self, response: Any) -> None:
+        if not self._transcript_enabled:
+            return
+        try:
+            msg = response.choices[0].message
+            as_dict = self._coerce_message_to_dict(msg)
+            self._tw("\nassistant_message:")
+            self._tw(json.dumps(as_dict, ensure_ascii=False, indent=2))
+        except Exception as e:
+            self._tw(f'\nassistant_message: {{"error":"unavailable","detail":"{e}"}}')
+
+    def _log_final_context(self, messages: list[dict[str, Any] | Any]) -> None:
+        if not self._transcript_enabled:
+            return
+        self._open_transcript()
+        self._tw("\n=== FINAL CONTEXT (end of run) ===")
+        self._tw(self._render_wire_json(messages))
 
 
 class ReasoningLLM(LLM, Agent):
@@ -496,18 +708,21 @@ Call exactly one action.
 class GuidedLLM(LLM, Agent):
     """Similar to LLM, with explicit human-provided rules in the user prompt to increase success rate."""
 
-    MAX_ACTIONS = 80
+    MAX_ACTIONS = 500
     DO_OBSERVATION = True
-    MODEL = "o3"
+    MODEL = "gpt-5-nano"  # switched from o3 to gpt-5
     MODEL_REQUIRES_TOOLS = True
-    MESSAGE_LIMIT = 10
-    REASONING_EFFORT = "high"
+    MESSAGE_LIMIT = 5
+    REASONING_EFFORT = "low"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._last_reasoning_tokens = 0
         self._last_response_content = ""
         self._total_reasoning_tokens = 0
+        # Always write a transcript for GuidedLLM
+        self._transcript_enabled = True
+        self._open_transcript()
 
     def choose_action(
         self, frames: list[FrameData], latest_frame: FrameData
@@ -539,7 +754,7 @@ class GuidedLLM(LLM, Agent):
         return action
 
     def track_tokens(self, tokens: int, message: str = "") -> None:
-        """Override to capture reasoning token information from o3 models."""
+        """Override to capture reasoning token information from gpt-5 (reasoning) models."""
         super().track_tokens(tokens, message)
 
         # Store the response content for reasoning context (avoid empty or JSON strings)
@@ -549,11 +764,7 @@ class GuidedLLM(LLM, Agent):
         self._total_reasoning_tokens += tokens
 
     def capture_reasoning_from_response(self, response: Any) -> None:
-        """Helper method to capture reasoning tokens from OpenAI API response.
-
-        This should be called from the parent class if we have access to the raw response.
-        For o3 models, reasoning tokens are in response.usage.completion_tokens_details.reasoning_tokens
-        """
+        """Helper method to capture reasoning tokens from OpenAI API response."""
         if hasattr(response, "usage") and hasattr(
             response.usage, "completion_tokens_details"
         ):
@@ -563,7 +774,7 @@ class GuidedLLM(LLM, Agent):
                 )
                 self._total_reasoning_tokens += self._last_reasoning_tokens
                 logger.debug(
-                    f"Captured {self._last_reasoning_tokens} reasoning tokens from o3 response"
+                    f"Captured {self._last_reasoning_tokens} reasoning tokens from {self.MODEL} response"
                 )
 
     def build_user_prompt(self, latest_frame: FrameData) -> str:
@@ -575,33 +786,91 @@ WIN and avoid GAME_OVER while minimizing actions.
 
 One action produces one Frame. One Frame is made of one or more sequential
 Grids. Each Grid is a matrix size INT<0,63> by INT<0,63> filled with
-INT<0,15> values.
+INT<0,15> values. Each value represents a different color and usually implies a different object.
 
-You are playing a game called LockSmith. Rules and strategy:
-* RESET: start over, ACTION1: move up, ACTION2: move down, ACTION3: move left, ACTION4: move right (ACTION5 and ACTION6 do nothing in this game)
-* you may may one action per turn
-* your goal is find and collect a matching key then touch the exit door
-* 6 levels total, score shows which level, complete all levels to win (grid row 62)
-* start each level with limited energy. you GAME_OVER if you run out (grid row 61)
-* the player is a 4x4 square: [[X,X,X,X],[0,0,0,X],[4,4,4,X],[4,4,4,X]] where X is transparent to the background
-* the grid represents a birds-eye view of the level
-* walls are made of INT<10>, you cannot move through a wall
-* walkable floor area is INT<8>
-* you can refill energy by touching energy pills (a 2x2 of INT<6>)
-* current key is shown in bottom-left of entire grid
-* the exit door is a 4x4 square with INT<11> border
-* to find a new key shape, touch the key rotator, a 4x4 square denoted by INT<9> and INT<4> in the top-left corner of the square
-* to find a new key color, touch the color rotator, a 4x4 square denoted by INT<9> and INT<2> and in the bottom-left corner of the square
-* to rotate more than once, move 1 space away from the rotator and back on
-* continue rotating the shape and color of the key until the key matches the one inside the exit door (scaled down 2X)
-* if the grid does not change after an action, you probably tried to move into a wall
+You are playing a game called LockSmith.
 
-An example of a good strategy observation:
-The player 4x4 made of INT<4> and INT<0> is standing below a wall of INT<10>, so I cannot move up anymore and should
-move left towards the rotator with INT<11>.
+# CONTROLS
+* RESET: start over
+* ACTION1: move up
+* ACTION2: move down
+* ACTION3: move left
+* ACTION4: move right
+* ACTION5/ACTION6: no-ops **never do these as they do nothing!**
 
+# ORIENTATION (read carefully)
+* The global frame is fixed: the bottom-left KEY INDICATOR is always at the bottom-left; the EXIT/lock is elsewhere.
+* ACTION1 (UP) moves you toward the area where 15s (move counters) are located; use this as a compass for “up.”
+* ACTION4 (RIGHT) increases your distance from the bottom-left key indicator; ACTION3 (LEFT) decreases it.
+* Legality checks with 4s (walls):
+  - RIGHT is ILLEGAL if any 4s lie immediately to the right (“after” in row order) of any 12/9 cells of your 8×8 player.
+  - LEFT is ILLEGAL if any 4s lie immediately to the left (“before” in row order) of any 12/9 cells of your 8×8 player.
+  - UP is ILLEGAL if any 4s lie directly above the topmost 12 row of your player.
+  - DOWN is ILLEGAL if any 4s lie directly below the bottommost 9 row of your player.
+* Always orient carefully before moving: check where the 15s lie (for UP), how far you are from the bottom-left indicator (for LEFT/RIGHT), and whether 4s precede/follow your 12s/9s in the intended direction.
+
+# GOAL
+Find/generate a key that MATCHES the key pattern shown at the EXIT, then navigate to the EXIT to finish the level.
+There are 6 levels total. Complete all levels to WIN.
+
+# TILE MEANINGS (important ones)
+* 0 = white cell (used in key patterns)
+* 3 = walkable path / corridor marker (often outlines routes to key/exit)
+* 4 = WALL (solid). You cannot enter 4s.
+* 5 = EXIT indicator (presence of 5s marks/frames the exit area)!!! **avoid this area and anything which touches it till the end**
+* 8 = LIFE token (count lives as the number of 2×2 blocks of 8s)
+* 9 = blue cells (used in player lower body; also appear elsewhere in the map and in key logic)
+* 12 = orange cells (used in player upper body)
+* 15 = MOVE counter (number of 15s ≈ moves/energy left)
+
+# PLAYER (sprite + movement legality)
+* The player is an 8×8 sprite made ONLY of 12s (top two rows) over 9s (bottom six rows).
+  - Concretely: rows 0–1 (relative to the sprite) are all 12s; rows 2–7 are all 9s.
+  - Other scattered 9s on the board are NOT the player—only the exact 8×8 (2×8 of 12s stacked on 6×8 of 9s) is the player.
+* Movement rules:
+  - You may move only through non-4 cells (i.e., never overlap a 4 after a move).
+  - If any part of your 8×8 sprite would overlap a 4 in the target direction (including cases where 4s lie “under” 9s), that move is ILLEGAL.
+  - If your sprite is already touching 4s on a side, you cannot move further in that touching direction until you have clearance.
+  - Practically: navigate corridors “between the 4s”.
+
+# KEYS, EXIT, AND HOW TO FIND THEM
+* Bottom-left KEY INDICATOR (non-interactive):
+  - A small block of 0s and 9s COMPLETELY BOXED by 4s in the bottom-left of the entire grid.
+  - This is NOT reachable and NOT a gameplay area. It only shows your CURRENT selected key.
+* EXIT (the lock to open):
+  - Elsewhere on the map, the lock is the target 0/9 pattern you must match, adjacent to some 5s (the 5s need not fully surround it).
+  - You may leave the level only when your current key EXACTLY matches this lock’s 0/9 distribution.
+* KEY GENERATOR (interactive, how to generate keys):
+  - Look for a patch consisting of 0s and 9s that has a CLEAR path of 3s leading to it and around it, and is NOT bordered by 5s or boxed by 4s.
+  - When any part of your 8×8 player steps ONTO this patch, it GENERATES a NEW candidate key and updates the bottom-left indicator.
+  - Step OFF the patch and then back ON to generate yet another candidate key; repeat to cycle through the set of keys.
+  - Continue cycling until the bottom-left indicator EXACTLY matches the lock pattern at the exit (the same 0/9 layout adjacent to 5s).
+* Locating things quickly:
+  - Generator: 0/9 patch accessible via 3s, with only 3s around it (no 5s), is almost certainly the generator.
+  - Exit: a matching 0/9 pattern near 5s marks the lock/exit area.
+
+# HUD / PROGRESSION
+* Visual score on the second-to-last grid row (row 62): it contains several 4-cell “slots”.
+  - Slots made of 3s represent UNFINISHED levels.
+  - When a slot changes from 3s to another color, that level is COMPLETE.
+* Track remaining MOVES/ENERGY by counting tiles with value 15.
+* Track LIVES by counting distinct 2×2 blocks of 8s.
+
+# GENERAL NOTES
+* The grid is a bird’s-eye view.
+* If the grid does not change after an action, you likely attempted an illegal move into 4s.
+* Favor routes marked by 3s; use the generator (0/9 patch surrounded by 3s) to cycle keys; confirm the match by comparing the bottom-left indicator (boxed by 4s) to the 0/9 lock pattern found near 5s; then proceed to the exit.
+
+# EXAMPLE STRATEGY OBSERVATION
+The 8×8 player (top rows 12s, bottom rows 9s) is touching 4s on the left, so LEFT is blocked. I see a 0/9 patch with only 3s around it to the right—that’s likely the generator. I should move RIGHT to step on/off it until the bottom-left indicator (boxed by 4s) matches the lock pattern I see near the 5s, then head to the exit.
+**again if the key indicator EVER matches the exit, head DIRECTLY to the exit avoiding the key generator. COMPARE THE KEY INDICATOR AND THE EXIT EVERYTIME FIRST THING**
+**Be smart and understand the positioning of the grids and where the 4s are**
+
+
+**AGAIN ALWAYS ALWAYS FIRST BEFORE ALL ELSE CHECK IF THE WIN CONDITION OF THE MATCHING KEYS IS SATISFIED FIRST. DON'T UNDERESTIMATE THIS, FREQUENTLY THE DISTRIBUTIONS OF THE 0S AND 9S DO MATCH SO BE SMART**
 # TURN:
 Call exactly one action.
+
         """.format()
         )
 
@@ -611,7 +880,7 @@ class MyCustomLLM(LLM):
     """Template for creating your own custom LLM agent."""
 
     MAX_ACTIONS = 80
-    MODEL = "gpt-4o-mini"
+    MODEL = "gpt-"
     DO_OBSERVATION = True
 
     def build_user_prompt(self, latest_frame: FrameData) -> str:
@@ -634,3 +903,478 @@ For example, explain the game rules, objectives, and optimal strategies.
 Call exactly one action.
         """.format()
         )
+class VisualGuidedLLM(GuidedLLM, Agent):
+    """
+    Visual-only Guided LLM with phase-specific prompts:
+      - Observation phase: paragraph analysis (no tool call)
+      - Action phase: call exactly one tool
+    Puts the observation directive into a SYSTEM message + repeats it in the USER
+    text that accompanies the image (so it can't be ignored). Increases MESSAGE_LIMIT
+    so the directive won't be clipped. Never sends the textual matrix; only a ≤64×64 PNG.
+    Emits 'reasoning' into recorder so the UI shows a Reasoning Log.
+    """
+
+    # --- palette 0..15 ---
+    KEY_COLORS = {
+        0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999",
+        3: "#666666", 4: "#333333", 5: "#000000",
+        6: "#E53AA3", 7: "#FF7BCC", 8: "#F93C31",
+        9: "#1E93FF", 10: "#88D8F1", 11: "#FFDC00",
+        12: "#FF851B", 13: "#921231", 14: "#4FCC30",
+        15: "#A356D6",
+    }
+
+    # defaults (overridable via __init__)
+    MODEL = "gpt-5-mini"
+    REASONING_EFFORT = "low"
+    DO_OBSERVATION = True
+    MODEL_REQUIRES_TOOLS = True
+    MESSAGE_LIMIT = 5  # larger so phase/system directives don't get clipped
+
+    def __init__(
+        self,
+        *args,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        do_observation: Optional[bool] = None,
+        model_requires_tools: Optional[bool] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if model is not None: self.MODEL = model
+        if reasoning_effort is not None: self.REASONING_EFFORT = reasoning_effort
+        if do_observation is not None: self.DO_OBSERVATION = do_observation
+        if model_requires_tools is not None: self.MODEL_REQUIRES_TOOLS = model_requires_tools
+
+        # state for image saving / de-dupe / logs
+        self._last_digest: Optional[str] = None
+        self._last_score: Optional[int] = None
+        self._img_counter: int = 0
+        self._last_obs_text: str = ""
+        self._last_obs_digest: Optional[str] = None
+        self._last_act_digest: Optional[str] = None
+
+        # transcript + per-run images dir
+        self._open_transcript()
+        base_dir = Path("transcripts/images")
+        run_stem = (self._transcript_path.stem if self._transcript_path else self.name)
+        self._images_dir = base_dir / run_stem
+        self._images_dir.mkdir(parents=True, exist_ok=True)
+
+    # ----------------- prompts (split by phase) -----------------
+
+    def build_game_context_prompt(self) -> str:
+        """Shared context fed to BOTH phases (no action directive)."""
+        return textwrap.dedent(
+            """
+# CONTEXT:
+You are an agent playing a dynamic game. Your objective is to
+WIN and avoid GAME_OVER while minimizing actions.
+
+One action produces one Frame. One Frame is made of one or more sequential
+Grids. Each Grid is a matrix size INT<0,63> by INT<0,63> filled with
+colored tiles. Each color represents a different object or rule.
+
+You are playing a game called LockSmith.
+
+# CONTROLS
+* RESET: start over
+* ACTION1: move up
+* ACTION2: move down
+* ACTION3: move left
+* ACTION4: move right
+* ACTION5/ACTION6: no-ops
+
+# ORIENTATION (read carefully)
+* The global frame is fixed: the bottom-left KEY INDICATOR is always at the bottom-left; the EXIT/lock is elsewhere.
+* ACTION1 (UP) moves you toward the area where purple tiles (move counters) are located; use this as a compass for “up.”
+* ACTION4 (RIGHT) increases your distance from the bottom-left key indicator; ACTION3 (LEFT) decreases it.
+* Legality checks with dark gray walls:
+  - RIGHT is ILLEGAL if any dark gray tiles lie immediately to the right (“after” in row order) of any orange/blue cells of your 8×8 player.
+  - LEFT is ILLEGAL if any dark gray tiles lie immediately to the left (“before” in row order) of any orange/blue cells of your 8×8 player.
+  - UP is ILLEGAL if any dark gray tiles lie directly above the topmost orange row of your player.
+  - DOWN is ILLEGAL if any dark gray tiles lie directly below the bottommost blue row of your player.
+* Always orient carefully before moving: check where the purple tiles lie (for UP), how far you are from the bottom-left indicator (for LEFT/RIGHT), and whether dark gray walls precede/follow your orange/blue rows in the intended direction.
+
+# GOAL
+Find/generate a key that MATCHES the key pattern shown at the EXIT, then navigate to the EXIT to finish the level.
+There are 6 levels total. Complete all levels to WIN.
+
+# TILE MEANINGS (important ones)
+* white = key pattern cells
+* light gray = walkable path / corridor marker (often outlines routes to key/exit)
+* dark gray = WALL (solid). You cannot enter dark gray.
+* pure black = EXIT indicator (presence of pure black tiles marks/frames the exit area)
+* red = LIFE token (count lives as the number of 2×2 blocks of red)
+* blue = player lower-body color and also used in key patterns
+* orange = player upper-body color
+* purple = MOVE/energy counter (number of purple tiles ≈ moves/energy left)
+
+# PLAYER (sprite + movement legality)
+* The player is an 8×8 sprite: the top two rows are all orange; the bottom six rows are all blue.
+  - Other scattered blue tiles on the board are NOT the player—only the exact 8×8 (2×8 of orange stacked on 6×8 of blue) is the player.
+* Movement rules:
+  - You may move only through non–dark gray tiles (i.e., never overlap a dark gray wall after a move).
+  - If any part of your 8×8 sprite would overlap dark gray in the target direction (including cases where dark gray lies “under” blue), that move is ILLEGAL.
+  - If your sprite is already touching dark gray on a side, you cannot move further in that touching direction until you have clearance.
+  - Practically: navigate corridors “between the dark gray walls.”
+
+# KEYS, EXIT, AND HOW TO FIND THEM
+* Bottom-left KEY INDICATOR (non-interactive):
+  - A small block of white and blue COMPLETELY BOXED by dark gray in the bottom-left of the entire grid.
+  - This is NOT reachable and NOT a gameplay area. It only shows your CURRENT selected key.
+* EXIT (the lock to open):
+  - Elsewhere on the map, the lock is the target white/blue pattern you must match, adjacent to some pure black tiles (they need not fully surround it).
+  - You may leave the level only when your current key EXACTLY matches this lock’s white/blue distribution.
+* KEY GENERATOR (interactive, how to generate keys):
+  - Look for a patch consisting of white and blue that has a CLEAR path of light gray leading to it and around it, and is NOT bordered by pure black or boxed by dark gray.
+  - When any part of your 8×8 player steps ONTO this patch, it GENERATES a NEW candidate key and updates the bottom-left indicator (boxed by dark gray).
+  - Step OFF the patch and then back ON to generate yet another candidate key; repeat to cycle through the set of keys.
+  - Continue cycling until the bottom-left indicator EXACTLY matches the lock pattern at the exit (the same white/blue layout adjacent to pure black).
+* Locating things quickly:
+  - Generator: a white/blue patch accessible via light gray, with only light gray around it (no pure black), is almost certainly the generator.
+  - Exit: a matching white/blue pattern near pure black tiles marks the lock/exit area.
+
+# HUD / PROGRESSION
+* Visual score on the second-to-last grid row: it contains several 4-tile “slots.”
+  - Slots made of light gray represent UNFINISHED levels.
+  - When a slot changes from light gray to another color, that level is COMPLETE.
+* Track remaining MOVES/ENERGY by counting purple tiles.
+* Track LIVES by counting distinct 2×2 blocks of red.
+
+# GENERAL NOTES
+* The grid is a bird’s-eye view.
+* If the grid does not change after an action, you likely attempted an illegal move into dark gray.
+* Favor routes marked by light gray; use the generator (white/blue patch surrounded by light gray) to cycle keys; confirm the match by comparing the bottom-left indicator (boxed by dark gray) to the white/blue lock pattern found near pure black; then proceed to the exit.
+
+# EXAMPLE STRATEGY OBSERVATION
+The 8×8 player (top rows orange, bottom rows blue) is touching dark gray on the left, so LEFT is blocked. I see a white/blue patch with only light gray around it to the right—that’s likely the generator. I should move RIGHT to step on/off it until the bottom-left indicator (boxed by dark gray) matches the lock pattern I see near the pure black tiles, then head to the exit.
+
+
+
+            """
+        )
+
+def build_observation_system_prompt(self) -> str:
+    """Hard phase guard so the model doesn't pick an action here."""
+    return textwrap.dedent(
+        """
+You are in the OBSERVATION PHASE.
+Write ONE clear paragraph (5–8 sentences) analyzing the attached image ONLY.
+Use color names (white, blue, orange, light gray, dark gray, pure black, red, purple)—no numbers.
+Do NOT choose or execute an action. Do NOT call tools. Do NOT answer with a single word.
+
+You MUST do ALL of the following in your paragraph:
+1) Compare the bottom-left key INDICATOR (white/blue boxed by dark gray; non-interactive) to the EXIT/lock (white/blue pattern adjacent to pure black). Explicitly state whether they MATCH. Note: the blue portion is fixed in both places; only the white distribution must match—double-check this carefully.
+2) Report the player’s location (the 8×8 sprite with orange top rows over blue bottom rows) relative to the board (e.g., quadrant/near which edge) AND the proximity of dark gray walls on all four sides (are walls close above, below, left, right?).
+3) For each direction (UP, DOWN, LEFT, RIGHT), state what would happen if you attempted that move, and whether it would be ILLEGAL due to overlapping dark gray walls.
+4) Identify the key GENERATOR if visible (white/blue patch surrounded by light gray, not boxed by dark gray and not near pure black) and the EXIT/lock if visible (white/blue near pure black).
+5) Mention purple (moves/energy) or red (lives) only if immediately relevant (e.g., low moves or scarce lives).
+If the indicator MATCHES the exit, explicitly begin planning to go to the exit via light gray paths, optionally touching purple tiles en route to recharge if needed.
+
+End with a one-sentence directional INTENT in prose only (e.g., “I intend to move right next if legal…”). Do NOT call a tool.
+        """
+    )
+
+
+    def build_observation_user_text(self, latest_frame: FrameData) -> str:
+        return textwrap.dedent(
+        f"""
+# OBSERVE (image attached):
+Analyze the attached image of the CURRENT 64×64 grid using ONLY color terms (white, blue, orange, light gray, dark gray, pure black, red, purple). No numbers.
+
+Include ALL of the following in ONE paragraph (5–8 sentences):
+1) Compare the bottom-left key INDICATOR (white/blue boxed by dark gray; non-interactive) with the EXIT/lock (white/blue adjacent to pure black). Say explicitly if they MATCH. Remember: the blue portion is fixed; only the white distribution must match.
+2) Describe the player’s location (orange-over-blue 8×8) relative to the board and report whether dark gray walls are close in each direction (up/down/left/right).
+3) Identify the GENERATOR (white/blue patch surrounded by light gray, no pure black nearby) and the EXIT/lock if visible.
+4) For UP, DOWN, LEFT, and RIGHT, state what would happen if moved and whether the move is ILLEGAL due to overlapping dark gray.
+5) Mention purple (moves) or red (lives) only if crucial now.
+6) If the indicator matches the lock, begin planning a route to the EXIT via light gray paths and optionally recharge on purple tiles if needed.
+
+Finish with a one-sentence directional INTENT in prose only (no tool call).
+
+State: {latest_frame.state.name} | Score: {latest_frame.score}
+        """
+    )
+
+
+    def build_action_system_prompt(self) -> str:
+        """Hard phase guard for the action call."""
+        return textwrap.dedent(
+            """
+You are in the ACTION PHASE.
+Call exactly ONE tool (RESET/ACTION1..ACTION6). No paragraphs. No multiple tools.
+            """
+        )
+
+    def build_action_user_prompt(self) -> str:
+        """Short, action-only user task."""
+        return textwrap.dedent(
+            """
+Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; avoid ACTION5/6 unless required).
+            """
+        )
+
+    # ----------------- rendering / saving / embedding -----------------
+
+    def _png_digest(self, png_bytes: bytes) -> str:
+        return hashlib.sha256(png_bytes).hexdigest()
+
+    def _grid_from_frame(self, frame: FrameData) -> Optional[list[list[int]]]:
+        if not frame or not frame.frame: return None
+        grids = frame.frame
+        grid = grids[-1] if grids and grids[-1] else grids[0]
+        if not grid or not grid[0]: return None
+        return grid
+
+    def _render_grid_png(self, grid: list[list[int]]) -> bytes:
+        h, w = len(grid), len(grid[0])
+        img = Image.new("RGB", (w, h), color="#000000")
+        draw = ImageDraw.Draw(img)
+        for y in range(h):
+            row = grid[y]
+            for x in range(w):
+                draw.point((x, y), fill=self.KEY_COLORS.get(row[x], "#888888"))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+
+    def _save_png_if_useful(self, png: bytes, latest_frame: FrameData, tag: str) -> tuple[Optional[str], Optional[str]]:
+        digest = self._png_digest(png)
+        force = (self._last_score is None) or (latest_frame.score != self._last_score)
+
+        # skip uniform except at score changes (fixes “pure black” spam; still force on level up)
+        im = Image.open(io.BytesIO(png))
+        colors = im.getcolors(maxcolors=256*256)
+        if colors and len(colors) == 1 and not force:
+            return (None, None)
+
+        if (self._last_digest == digest) and not force:
+            return (None, None)
+
+        self._img_counter += 1
+        fname = f"{latest_frame.score:02d}-{self._img_counter:05d}-{tag}-{digest[:8]}.png"
+        path = self._images_dir / fname
+        with open(path, "wb") as f:
+            f.write(png)
+        self._tw(f"# saved image: {str(path.resolve())}")
+
+        self._last_digest = digest
+        self._last_score = latest_frame.score
+        return (str(path.resolve()), digest)
+
+    def _frame_to_png_dataurl(self, frame: FrameData, tag: str) -> tuple[Optional[str], Optional[str]]:
+        grid = self._grid_from_frame(frame)
+        if grid is None: return (None, None)
+        png = self._render_grid_png(grid)
+        _abs, digest = self._save_png_if_useful(png, frame, tag)
+        if _abs is None: return (None, None)
+        b64 = base64.b64encode(png).decode("ascii")
+        return (f"data:image/png;base64,{b64}", digest)
+
+    # ----------------- reasoning log helper -----------------
+
+    def _record_reasoning(self, phase: str, text: str, **extra: Any) -> None:
+        if hasattr(self, "recorder") and not self.is_playback:
+            payload = {"phase": phase, "reasoning": text}
+            payload.update(extra)
+            # also mirror to keys some UIs expect
+            payload["assistant"] = text
+            payload["reasoning_log"] = text
+            self.recorder.record(payload)
+
+    # ----------------- main loop (phase-separated messaging) -----------------
+
+    def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
+        logging.getLogger("openai").setLevel(logging.CRITICAL)
+        logging.getLogger("httpx").setLevel(logging.CRITICAL)
+        client = OpenAIClient(api_key=os.environ.get("OPENAI_API_KEY", ""))
+
+        functions = self.build_functions()
+        tools = self.build_tools()
+
+        # First turn: seed with shared context + RESET
+        if len(self.messages) == 0:
+            # Shared game context (no “choose one action” language)
+            self.push_message({"role": "user", "content": self.build_game_context_prompt()})
+            # Kick off with RESET
+            if self.MODEL_REQUIRES_TOOLS:
+                self.push_message({
+                    "role": "assistant",
+                    "tool_calls": [{
+                        "id": self._latest_tool_call_id,
+                        "type": "function",
+                        "function": {"name": GameAction.RESET.name, "arguments": json.dumps({})},
+                    }],
+                })
+            else:
+                self.push_message({"role": "assistant", "function_call": {"name": "RESET", "arguments": json.dumps({})}})
+            self._log_seed_messages(self.messages)
+            return GameAction.RESET
+
+        # Tool result sets up the observation turn
+        function_name = latest_frame.action_input.id.name
+        # Keep function/tool reply minimal; add big instruction in system+user below
+        obs_header = f"State: {latest_frame.state.name} | Score: {latest_frame.score}"
+        if self.MODEL_REQUIRES_TOOLS:
+            self.push_message({"role": "tool", "tool_call_id": self._latest_tool_call_id, "content": obs_header})
+        else:
+            self.push_message({"role": "function", "name": function_name, "content": obs_header})
+
+        # -------- OBSERVATION PHASE --------
+        self._last_obs_text = ""
+        self._last_obs_digest = None
+        if self.DO_OBSERVATION:
+            # Phase guard as SYSTEM + rich USER text + image in SAME user turn
+            self.push_message({"role": "system", "content": self.build_observation_system_prompt()})
+            data_url, digest = self._frame_to_png_dataurl(latest_frame, tag="obs")
+            self._last_obs_digest = digest
+            if data_url:
+                obs_text = self.build_observation_user_text(latest_frame)
+                content = [
+                    {"type": "text", "text": obs_text},
+                    {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}},
+                ]
+                self.push_message({"role": "user", "content": content})
+                self._tw(f"# [obs] embedded digest={digest}")
+            else:
+                self._tw("# [obs] skipped embedding image (empty/duplicate/uniform)")
+
+            logger.info("Sending to Assistant for observation (with image)...")
+            try:
+                create_kwargs = {"model": self.MODEL, "messages": self._coerce_messages_for_wire(self.messages)}
+                if self.REASONING_EFFORT is not None:
+                    create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+                self._log_api_call("observation", self.MODEL, self.messages)
+                response = client.chat.completions.create(**create_kwargs)
+                self.capture_reasoning_from_response(response)
+                self._log_api_response(response)
+            except openai.BadRequestError as e:
+                logger.info(f"Message dump: {self.messages}")
+                raise e
+
+            obs_text_out = response.choices[0].message.content or ""
+            self._last_obs_text = obs_text_out
+            self.track_tokens(response.usage.total_tokens, obs_text_out)
+            logger.info(f"[OBSERVATION] {obs_text_out}")
+            self.push_message({"role": "assistant", "content": obs_text_out})
+            self._record_reasoning("observation", obs_text_out, image_digest=self._last_obs_digest)
+
+        # -------- ACTION PHASE --------
+        # Action directives as SYSTEM + short USER text + image; now we provide tools
+        self.push_message({"role": "system", "content": self.build_action_system_prompt()})
+        self.push_message({"role": "user", "content": self.build_action_user_prompt()})
+        data_url_act, digest_act = self._frame_to_png_dataurl(latest_frame, tag="act")
+        self._last_act_digest = digest_act
+        if data_url_act:
+            self.push_message({
+                "role": "user",
+                "content": [{"type": "image_url", "image_url": {"url": data_url_act, "detail": "low"}}],
+            })
+            self._tw(f"# [act] embedded digest={digest_act}")
+        else:
+            self._tw("# [act] skipped embedding image (empty/duplicate/uniform)")
+
+        chosen_name = GameAction.ACTION5.name
+        arguments = None
+        assistant_msg = None
+
+        if self.MODEL_REQUIRES_TOOLS:
+            logger.info("Sending to Assistant for action (with image)...")
+            try:
+                create_kwargs = {
+                    "model": self.MODEL,
+                    "messages": self._coerce_messages_for_wire(self.messages),
+                    "tools": tools,
+                    "tool_choice": "required",
+                }
+                if self.REASONING_EFFORT is not None:
+                    create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+                self._log_api_call("action", self.MODEL, self.messages, tools=tools, tool_choice="required")
+                response = client.chat.completions.create(**create_kwargs)
+                self.capture_reasoning_from_response(response)
+                self._log_api_response(response)
+            except openai.BadRequestError as e:
+                logger.info(f"Message dump: {self.messages}")
+                raise e
+
+            self.track_tokens(response.usage.total_tokens)
+            assistant_msg = response.choices[0].message
+            tool_call = assistant_msg.tool_calls[0]
+            self._latest_tool_call_id = tool_call.id
+            chosen_name = tool_call.function.name
+            arguments = tool_call.function.arguments
+            logger.info(f"[ACTION] {chosen_name} {arguments}")
+
+            for tc in assistant_msg.tool_calls[1:]:
+                self.push_message({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": "Error: assistant can only call one action at a time. Using the first.",
+                })
+        else:
+            logger.info("Sending to Assistant for action (with image)...")
+            try:
+                create_kwargs = {
+                    "model": self.MODEL,
+                    "messages": self._coerce_messages_for_wire(self.messages),
+                    "functions": functions,
+                    "function_call": "auto",
+                }
+                if self.REASONING_EFFORT is not None:
+                    create_kwargs["reasoning_effort"] = self.REASONING_EFFORT
+                self._log_api_call("action", self.MODEL, self.messages, functions=functions)
+                response = client.chat.completions.create(**create_kwargs)
+                self.capture_reasoning_from_response(response)
+                self._log_api_response(response)
+            except openai.BadRequestError as e:
+                logger.info(f"Message dump: {self.messages}")
+                raise e
+
+            self.track_tokens(response.usage.total_tokens)
+            assistant_msg = response.choices[0].message
+            fc = assistant_msg.function_call
+            chosen_name = fc.name
+            arguments = fc.arguments
+            logger.info(f"[ACTION] {chosen_name} {arguments}")
+
+        if assistant_msg:
+            self.push_message(assistant_msg)
+
+        # parse args
+        try:
+            data = json.loads(arguments) if arguments else {}
+        except Exception as e:
+            logger.warning(f"JSON parsing error on function response: {e}")
+            data = {}
+
+        action = GameAction.from_name(chosen_name)
+        action.set_data(data)
+
+        # attach rich reasoning + mirror to recorder
+        action.reasoning = {
+            "model": self.MODEL,
+            "reasoning_effort": self.REASONING_EFFORT,
+            "action_chosen": action.name,
+            "agent_type": "visual_guided_llm",
+            "game_rules": "locksmith",
+            "game_context": {
+                "score": latest_frame.score,
+                "state": latest_frame.state.name,
+                "action_counter": self.action_counter,
+                "frame_count": len(frames),
+            },
+            "observation": self._last_obs_text,
+            "observation_image_digest": self._last_obs_digest,
+            "action_image_digest": self._last_act_digest,
+            "reasoning_tokens": getattr(self, "_last_reasoning_tokens", 0),
+            "total_reasoning_tokens": getattr(self, "_total_reasoning_tokens", 0),
+        }
+        self._record_reasoning(
+            "action",
+            self._last_obs_text,
+            chosen_action=action.name,
+            observation_image_digest=self._last_obs_digest,
+            action_image_digest=self._last_act_digest,
+        )
+        return action
