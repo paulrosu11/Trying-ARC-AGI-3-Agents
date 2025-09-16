@@ -708,7 +708,7 @@ Call exactly one action.
 class GuidedLLM(LLM, Agent):
     """Similar to LLM, with explicit human-provided rules in the user prompt to increase success rate."""
 
-    MAX_ACTIONS = 500
+    MAX_ACTIONS = 50
     DO_OBSERVATION = True
     MODEL = "gpt-5-nano"  # switched from o3 to gpt-5
     MODEL_REQUIRES_TOOLS = True
@@ -941,10 +941,25 @@ class VisualGuidedLLM(GuidedLLM, Agent):
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        if model is not None: self.MODEL = model
-        if reasoning_effort is not None: self.REASONING_EFFORT = reasoning_effort
-        if do_observation is not None: self.DO_OBSERVATION = do_observation
-        if model_requires_tools is not None: self.MODEL_REQUIRES_TOOLS = model_requires_tools
+        # explicit kw override
+        if model is not None:
+            self.MODEL = model
+        # env var fallback if kw not provided
+        if model is None:
+            import os
+            env_model = (
+                os.getenv("ARC_VLM_MODEL")
+                or os.getenv("VLM_MODEL")
+                or os.getenv("OPENAI_VLM_MODEL")
+            )
+            if env_model:
+                self.MODEL = env_model
+        if reasoning_effort is not None:
+            self.REASONING_EFFORT = reasoning_effort
+        if do_observation is not None:
+            self.DO_OBSERVATION = do_observation
+        if model_requires_tools is not None:
+            self.MODEL_REQUIRES_TOOLS = model_requires_tools
 
         # state for image saving / de-dupe / logs
         self._last_digest: Optional[str] = None
@@ -1055,9 +1070,9 @@ The 8×8 player (top rows orange, bottom rows blue) is touching dark gray on the
             """
         )
 
-def build_observation_system_prompt(self) -> str:
-    """Hard phase guard so the model doesn't pick an action here."""
-    return textwrap.dedent(
+    def build_observation_system_prompt(self) -> str:
+        """Hard phase guard so the model doesn't pick an action here."""
+        return textwrap.dedent(
         """
 You are in the OBSERVATION PHASE.
 Write ONE clear paragraph (5–8 sentences) analyzing the attached image ONLY.
@@ -1196,7 +1211,7 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
         # First turn: seed with shared context + RESET
         if len(self.messages) == 0:
             # Shared game context (no “choose one action” language)
-            self.push_message({"role": "user", "content": self.build_game_context_prompt()})
+            self.push_message({"role": "system", "content": self.build_game_context_prompt()})
             # Kick off with RESET
             if self.MODEL_REQUIRES_TOOLS:
                 self.push_message({
@@ -1229,8 +1244,8 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
             self.push_message({"role": "system", "content": self.build_observation_system_prompt()})
             data_url, digest = self._frame_to_png_dataurl(latest_frame, tag="obs")
             self._last_obs_digest = digest
+            obs_text = self.build_observation_user_text(latest_frame)
             if data_url:
-                obs_text = self.build_observation_user_text(latest_frame)
                 content = [
                     {"type": "text", "text": obs_text},
                     {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}},
@@ -1238,7 +1253,10 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
                 self.push_message({"role": "user", "content": content})
                 self._tw(f"# [obs] embedded digest={digest}")
             else:
-                self._tw("# [obs] skipped embedding image (empty/duplicate/uniform)")
+                # Always send the checklist text even without an image (prevents empty observation).
+                self.push_message({"role": "user", "content": [{"type": "text", "text": obs_text}]})
+                self._tw("# [obs] no image embedded; sent text-only checklist")
+            
 
             logger.info("Sending to Assistant for observation (with image)...")
             try:
@@ -1379,3 +1397,107 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
         )
         return action
 
+class BimodalGuidedChecklistLLM(VisualGuidedLLM, Agent):
+    """
+    Visual-first guided VLM with a strict 10-item observation checklist.
+    Optional 'bimodal' mode appends a numbers→colors mapping and (optionally) the textual grid,
+    clearly labeled as the EXACT same state as the image.
+
+    Differences from VisualGuidedLLM:
+      - Observation: forced structured checklist (10 items) + "Summary:" line.
+      - Bimodal gating: numeric mapping/grid only when enabled.
+      - Model override supported (kwarg or env).
+    """
+
+    BIMODAL_TEXT: bool = True
+    INCLUDE_TEXTUAL_GRID: bool = True
+
+    INT_TO_COLOR_NAME: dict[int, str] = {
+        0: "white", 1: "light gray", 2: "gray", 3: "dim gray",
+        4: "dark gray", 5: "pure black", 6: "magenta", 7: "pink",
+        8: "orange-red", 9: "blue", 10: "light blue", 11: "yellow",
+        12: "orange", 13: "maroon", 14: "green", 15: "purple",
+    }
+
+    def __init__(
+        self,
+        *args,
+        model: Optional[str] = None,
+        reasoning_effort: Optional[str] = None,
+        do_observation: Optional[bool] = None,
+        model_requires_tools: Optional[bool] = None,
+        bimodal: Optional[bool] = None,
+        include_textual_grid: Optional[bool] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            *args,
+            model=model,
+            reasoning_effort=reasoning_effort,
+            do_observation=do_observation,
+            model_requires_tools=model_requires_tools,
+            **kwargs,
+        )
+        if bimodal is not None:
+            self.BIMODAL_TEXT = bool(bimodal)
+        if include_textual_grid is not None:
+            self.INCLUDE_TEXTUAL_GRID = bool(include_textual_grid)
+
+    
+
+    def build_observation_system_prompt(self) -> str:
+        return textwrap.dedent(
+            """
+You are in the OBSERVATION PHASE (CHECKLIST). Do NOT call tools. No code blocks.
+Output must contain exactly 10 numbered items followed by a final line beginning with "Summary:".
+
+Checklist (use ONLY color words; avoid numbers unless explicitly provided via additional textual context):
+1) Player position & nearby walls (8×8: orange top rows over blue bottom rows). Where on the board? Any dark gray walls close above/below/left/right?
+2) Bottom-left key indicator (boxed by dark gray): describe the white/blue layout and its orientation.
+3) Exit/lock (near pure black): describe its white/blue layout and orientation.
+4) Match status: “Match” or “No match” + one-line justification (white/blue distribution AND orientation).
+5) Key generator: identify candidate patch(es) (white/blue surrounded by light gray, not boxed by dark gray, not near pure black) + short justification.
+6) Moves/energy: status inferred from purple tiles (LOW/OK) and whether recharging is relevant in this position.
+7) Lives: count distinct red 2×2 clusters; note if relevant risk.
+8) Direction outcomes (UP/DOWN/LEFT/RIGHT): for EACH direction state LEGAL/ILLEGAL (overlapping dark gray?), and whether it moves you closer/farther/same to the generator and to the lock (with a brief reason).
+9) Best immediate waypoint: name it (generator, lock, or corridor node) and give a 1–2 step light‑gray route.
+10) Hazards & constraints: narrow corridors, dead-ends, wall contact, energy risks.
+
+Summary: One sentence with intended next direction and the reason (no tool call).
+            """
+        )
+
+    def _numbers_to_colors_map_text(self) -> str:
+        lines = []
+        for i in range(16):
+            hexcol = self.KEY_COLORS.get(i, "#888888")
+            name = self.INT_TO_COLOR_NAME.get(i, "unknown")
+            lines.append(f"{i:>2} → {name} ({hexcol})")
+        return "\n".join(lines)
+
+    def _bimodal_tail(self, latest_frame: FrameData) -> str:
+        mapping = self._numbers_to_colors_map_text()
+        tail = [
+            "",
+            "# ADDITIONAL TEXTUAL CONTEXT (EXACT SAME STATE AS IMAGE)",
+            "The textual representation encodes the same frame you see in the image.",
+            "Use the following mapping from numbers to colors:",
+            mapping,
+        ]
+        if self.INCLUDE_TEXTUAL_GRID:
+            grid_text = self.pretty_print_3d(latest_frame.frame)
+            tail.extend(["", "# TEXTUAL GRID", grid_text])
+        return "\n".join(tail)
+
+    def build_observation_user_text(self, latest_frame: FrameData) -> str:
+        head = textwrap.dedent(
+            f"""
+# OBSERVE:
+Fill the 10‑item checklist
+
+State: {latest_frame.state.name} | Score: {latest_frame.score}
+            """
+        )
+        if self.BIMODAL_TEXT:
+            return head + "\n" + self._bimodal_tail(latest_frame)
+        return head

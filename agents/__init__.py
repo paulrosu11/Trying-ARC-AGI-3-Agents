@@ -13,7 +13,7 @@ from .templates.random_agent import Random
 from .templates.reasoning_agent import ReasoningAgent
 from .templates.smolagents import SmolCodingAgent, SmolVisionAgent
 from .templates.manual_script_runner import ManualScriptText, ManualScriptVision
-
+from .templates.llm_agents import BimodalGuidedChecklistLLM 
 load_dotenv()
 
 AVAILABLE_AGENTS: dict[str, Type[Agent]] = {
@@ -58,4 +58,5 @@ __all__ = [
     "Recorder",
     "Playback",
     "AVAILABLE_AGENTS",
+    
 ]
