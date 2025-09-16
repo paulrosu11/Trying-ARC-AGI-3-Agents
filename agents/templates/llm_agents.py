@@ -987,7 +987,7 @@ You are playing a game called LockSmith.
 
 # ORIENTATION (read carefully)
 * The global frame is fixed: the bottom-left KEY INDICATOR is always at the bottom-left; the EXIT/lock is elsewhere.
-* ACTION1 (UP) moves you toward the area where purple tiles (move counters) are located; use this as a compass for “up.”
+* ACTION1 (UP) moves you toward the lives and moves indicators and most importantly toward the upper wall.
 * ACTION4 (RIGHT) increases your distance from the bottom-left key indicator; ACTION3 (LEFT) decreases it.
 * Legality checks with dark gray walls:
   - RIGHT is ILLEGAL if any dark gray tiles lie immediately to the right (“after” in row order) of any orange/blue cells of your 8×8 player.
@@ -1039,7 +1039,7 @@ There are 6 levels total. Complete all levels to WIN.
 * Visual score on the second-to-last grid row: it contains several 4-tile “slots.”
   - Slots made of light gray represent UNFINISHED levels.
   - When a slot changes from light gray to another color, that level is COMPLETE.
-* Track remaining MOVES/ENERGY by counting purple tiles.
+* Track remaining MOVES/ENERGY by counting purple tiles. **DO PAY ATTENTION TO THIS AND BE CAREFUL!**
 * Track LIVES by counting distinct 2×2 blocks of red.
 
 # GENERAL NOTES
@@ -1378,3 +1378,4 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
             action_image_digest=self._last_act_digest,
         )
         return action
+

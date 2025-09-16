@@ -12,6 +12,7 @@ from .templates.llm_agents import LLM, FastLLM, GuidedLLM, ReasoningLLM
 from .templates.random_agent import Random
 from .templates.reasoning_agent import ReasoningAgent
 from .templates.smolagents import SmolCodingAgent, SmolVisionAgent
+from .templates.manual_script_runner import ManualScriptText, ManualScriptVision
 
 load_dotenv()
 
@@ -27,6 +28,17 @@ for rec in Recorder.list():
 
 # update the agent dictionary to include subclasses of LLM class
 AVAILABLE_AGENTS["reasoningagent"] = ReasoningAgent
+
+AVAILABLE_AGENTS.update({
+    # canonical keys
+    "manualscripttext": ManualScriptText,
+    "manualscriptvision": ManualScriptVision,
+    # nice aliases
+    "manual-script-text": ManualScriptText,
+    "manual-script-vision": ManualScriptVision,
+    "manual_script_text": ManualScriptText,
+    "manual_script_vision": ManualScriptVision,
+})
 
 __all__ = [
     "Swarm",
