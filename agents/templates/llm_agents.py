@@ -925,11 +925,11 @@ class VisualGuidedLLM(GuidedLLM, Agent):
     }
 
     # defaults (overridable via __init__)
-    MODEL = "gpt-5-mini"
+    MODEL = "gpt-5"
     REASONING_EFFORT = "low"
     DO_OBSERVATION = True
     MODEL_REQUIRES_TOOLS = True
-    MESSAGE_LIMIT = 5  # larger so phase/system directives don't get clipped
+    MESSAGE_LIMIT = 14  # larger so phase/system directives don't get clipped
 
     def __init__(
         self,
