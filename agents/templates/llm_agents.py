@@ -710,10 +710,10 @@ class GuidedLLM(LLM, Agent):
 
     MAX_ACTIONS = 50
     DO_OBSERVATION = True
-    MODEL = "gpt-5-nano"  # switched from o3 to gpt-5
+    MODEL = "gpt-5"  # switched from o3 to gpt-5
     MODEL_REQUIRES_TOOLS = True
     MESSAGE_LIMIT = 5
-    REASONING_EFFORT = "low"
+    REASONING_EFFORT = "high"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -926,7 +926,7 @@ class VisualGuidedLLM(GuidedLLM, Agent):
 
     # defaults (overridable via __init__)
     MODEL = "gpt-5"
-    REASONING_EFFORT = "low"
+    REASONING_EFFORT = "high"
     DO_OBSERVATION = True
     MODEL_REQUIRES_TOOLS = True
     MESSAGE_LIMIT = 14  # larger so phase/system directives don't get clipped
@@ -1248,7 +1248,7 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
             if data_url:
                 content = [
                     {"type": "text", "text": obs_text},
-                    {"type": "image_url", "image_url": {"url": data_url, "detail": "low"}},
+                    {"type": "image_url", "image_url": {"url": data_url, "detail": "high"}},
                 ]
                 self.push_message({"role": "user", "content": content})
                 self._tw(f"# [obs] embedded digest={digest}")
@@ -1287,7 +1287,7 @@ Use the attached image to decide exactly one action (RESET or ACTION1..ACTION4; 
         if data_url_act:
             self.push_message({
                 "role": "user",
-                "content": [{"type": "image_url", "image_url": {"url": data_url_act, "detail": "low"}}],
+                "content": [{"type": "image_url", "image_url": {"url": data_url_act, "detail": "high"}}],
             })
             self._tw(f"# [act] embedded digest={digest_act}")
         else:
@@ -1409,8 +1409,8 @@ class BimodalGuidedChecklistLLM(VisualGuidedLLM, Agent):
       - Model override supported (kwarg or env).
     """
 
-    BIMODAL_TEXT: bool = True
-    INCLUDE_TEXTUAL_GRID: bool = True
+    BIMODAL_TEXT: bool = False
+    INCLUDE_TEXTUAL_GRID: bool = False
 
     INT_TO_COLOR_NAME: dict[int, str] = {
         0: "white", 1: "light gray", 2: "gray", 3: "dim gray",
@@ -1451,11 +1451,11 @@ class BimodalGuidedChecklistLLM(VisualGuidedLLM, Agent):
 You are in the OBSERVATION PHASE (CHECKLIST). Do NOT call tools. No code blocks.
 Output must contain exactly 10 numbered items followed by a final line beginning with "Summary:".
 
-Checklist (use ONLY color words; avoid numbers unless explicitly provided via additional textual context):
+Checklist:
 1) Player position & nearby walls (8×8: orange top rows over blue bottom rows). Where on the board? Any dark gray walls close above/below/left/right?
 2) Bottom-left key indicator (boxed by dark gray): describe the white/blue layout and its orientation.
 3) Exit/lock (near pure black): describe its white/blue layout and orientation.
-4) Match status: “Match” or “No match” + one-line justification (white/blue distribution AND orientation).
+4) Match status: “Match” or “No match” + justification (white/blue distribution AND orientation), reall be careful, oftentimes they do actually match, and the distribution of the blue squares almost always do!
 5) Key generator: identify candidate patch(es) (white/blue surrounded by light gray, not boxed by dark gray, not near pure black) + short justification.
 6) Moves/energy: status inferred from purple tiles (LOW/OK) and whether recharging is relevant in this position.
 7) Lives: count distinct red 2×2 clusters; note if relevant risk.
