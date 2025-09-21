@@ -6,6 +6,7 @@ readme = "readme.md"
 requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
+    "google-generativeai>=0.8.5",
     "langchain[openai]>=0.3.27",
     "langgraph>=0.6.3",
     "langgraph-checkpoint-sqlite>=2.0.11",
@@ -14,7 +15,7 @@ dependencies = [
     "pillow>=11.2.1",
     "pydantic>=2.11.7",
     "requests>=2.32.4",
-    "smolagents>=1.20.0"
+    "smolagents>=1.20.0",
 ]
 
 [dependency-groups]
