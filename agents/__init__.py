@@ -13,7 +13,16 @@ from .templates.random_agent import Random
 from .templates.reasoning_agent import ReasoningAgent
 from .templates.smolagents import SmolCodingAgent, SmolVisionAgent
 from .templates.manual_script_runner import ManualScriptText, ManualScriptVision
-from .templates.llm_agents import BimodalGuidedChecklistLLM 
+from .templates.llm_agents import BimodalGuidedChecklistLLM
+
+from .templates.as66 import (
+    AS66GuidedAgent,
+    AS66VisualGuidedAgent,
+    AS66ManualScriptText,
+    AS66ManualScriptVision,
+    AS66GuidedAgent64
+)
+
 load_dotenv()
 
 AVAILABLE_AGENTS: dict[str, Type[Agent]] = {
@@ -29,15 +38,28 @@ for rec in Recorder.list():
 # update the agent dictionary to include subclasses of LLM class
 AVAILABLE_AGENTS["reasoningagent"] = ReasoningAgent
 
+# LS20 manual runners: friendly aliases
 AVAILABLE_AGENTS.update({
-    # canonical keys
     "manualscripttext": ManualScriptText,
     "manualscriptvision": ManualScriptVision,
-    # nice aliases
     "manual-script-text": ManualScriptText,
     "manual-script-vision": ManualScriptVision,
     "manual_script_text": ManualScriptText,
     "manual_script_vision": ManualScriptVision,
+})
+
+# AS66 runners: friendly aliases
+AVAILABLE_AGENTS.update({
+    "as66manualscripttext": AS66ManualScriptText,
+    "as66manualscriptvision": AS66ManualScriptVision,
+    "as66-manual-text": AS66ManualScriptText,
+    "as66-manual-vision": AS66ManualScriptVision,
+
+    "as66guidedagent": AS66GuidedAgent,
+    "as66-visual-guided": AS66VisualGuidedAgent,
+    "as66visualguidedagent": AS66VisualGuidedAgent,
+    "as66-guided": AS66GuidedAgent,
+    "as66guidedagent64": AS66GuidedAgent64,
 })
 
 __all__ = [
@@ -58,5 +80,4 @@ __all__ = [
     "Recorder",
     "Playback",
     "AVAILABLE_AGENTS",
-    
 ]
