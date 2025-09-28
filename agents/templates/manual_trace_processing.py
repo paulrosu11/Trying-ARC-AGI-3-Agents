@@ -1,27 +1,37 @@
 # agents/templates/manual_trace_processing.py
-# Text-only LS20 L1×L2 combinations → ARC states → interleaved rationales (no state repetition).
-# Run: uv run python agents/templates/manual_trace_processing.py
+# Text or Visual LS20 L1×L2 combinations → ARC states → interleaved rationales (no state repetition).
+# Run (text):   uv run python agents/templates/manual_trace_processing.py
+# Run (visual): uv run python agents/templates/manual_trace_processing.py --visual --backend gemini
+# Flags: --print-prompts   Print FULL extracted prompts (also saved to files)
 #
 # Folder layout:
 #   transcripts/<UTC>/annotated_manual_traces/
 #     └── combos/<L1_name>__x__<L2_name>/
-#         ├── arc_frames.jsonl     # raw ARC frames (proof of API)
-#         ├── interleaved.jsonl    # one row per step (pre/post state + COT)
-#         ├── interleaved.md       # INITIAL STATE, then (RATIONALE → MOVE → STATE AFTER)* with level markers
-#         └── sft.jsonl (optional) # flat {move,cot} rows if --flat-sft
+#         ├── arc_frames.jsonl
+#         ├── interleaved.jsonl
+#         ├── interleaved.md
+#         ├── sft.jsonl (optional)
+#         ├── visual_system_prompt.txt
+#         └── text_system_prompt.txt
 
 from __future__ import annotations
 
 import argparse
+import base64
+import io
 import json
 import os
 import re
+import ast
+import importlib.util
+import textwrap
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
+from PIL import Image  # for visual mode
 
 # ---- LLM backends (OpenAI + Gemini) ----
 try:
@@ -162,7 +172,6 @@ class ARCClient:
     def reset(self) -> Dict[str, Any]:
         if not self.card_id:
             _die("reset() called without open scorecard.")
-        # Try payload variants; server implementations can differ subtly.
         attempts = [
             {"card_id": self.card_id, "game_id": self.game_id},
             {"card_id": self.card_id},
@@ -187,40 +196,202 @@ class ARCClient:
         self.guid = res.get("guid", self.guid)
         return res
 
-# ----------------------------- LS20 textual context (from your code) -----------------------------
+# ----------------------------- robust prompt extractors -----------------------------
 
 LLM_AGENTS_PY = Path(__file__).resolve().parent / "llm_agents.py"
 
-def _extract_ls20_context() -> str:
+def _read_src() -> str:
     if not LLM_AGENTS_PY.exists():
-        _die(f"Missing {LLM_AGENTS_PY}. Cannot extract LS20 text context.")
-    src = LLM_AGENTS_PY.read_text(encoding="utf-8")
-    m_class = re.search(r"\bclass\s+GuidedLLM\b", src)
-    if not m_class:
-        _die("GuidedLLM not found in llm_agents.py.")
-    region = src[m_class.start():]
-    m_def = re.search(r"def\s+build_user_prompt\s*\(", region)
-    if not m_def:
-        _die("build_user_prompt not found in GuidedLLM.")
-    sub = region[m_def.end():]
-    m_q1 = re.search(r'("""|\'\'\')', sub, re.DOTALL)
-    if not m_q1:
-        _die("No triple-quoted text in build_user_prompt.")
-    q = m_q1.group(1); start = m_q1.end()
-    m_q2 = re.search(re.escape(q), sub[start:], re.DOTALL)
-    if not m_q2:
-        _die("Unterminated triple-quoted block in build_user_prompt.")
-    end = start + m_q2.start()
-    block = sub[start:end].strip()
-    if not block:
-        _die("Extracted LS20 context is empty.")
-    return block.strip()
+        _die(f"Missing {LLM_AGENTS_PY}. Cannot extract prompts.")
+    return LLM_AGENTS_PY.read_text(encoding="utf-8")
 
-TEXT_CONTEXT = _extract_ls20_context()
+def _eval_stringish(node: ast.AST, resolvers: List[Dict[str, str]]) -> Optional[str]:
+    """Evaluate string-like AST nodes with limited, safe semantics."""
+    def _resolve_name(name: str) -> Optional[str]:
+        for r in resolvers:
+            if name in r:
+                return r[name]
+        return None
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+
+    if isinstance(node, ast.JoinedStr):
+        parts: List[str] = []
+        for v in node.values:
+            if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                parts.append(v.value)
+            elif isinstance(v, ast.FormattedValue):
+                inner = _eval_stringish(v.value, resolvers)
+                if inner is None:
+                    return None
+                parts.append(inner)
+            else:
+                return None
+        return "".join(parts)
+
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        l = _eval_stringish(node.left, resolvers)
+        r = _eval_stringish(node.right, resolvers)
+        if l is None or r is None:
+            return None
+        return l + r
+
+    if isinstance(node, ast.Name):
+        return _resolve_name(node.id)
+
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id == "dedent" and len(node.args) == 1:
+            inner = _eval_stringish(node.args[0], resolvers)
+            return textwrap.dedent(inner) if inner is not None else None
+
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "dedent" and len(node.args) == 1:
+            inner = _eval_stringish(node.args[0], resolvers)
+            return textwrap.dedent(inner) if inner is not None else None
+
+        if isinstance(node.func, ast.Attribute) and node.func.attr in ("strip", "lstrip", "rstrip"):
+            base = _eval_stringish(node.func.value, resolvers)
+            if base is None:
+                return None
+            try:
+                return getattr(base, node.func.attr)()
+            except Exception:
+                return None
+
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+            base = _eval_stringish(node.func.value, resolvers)
+            if base is None:
+                return None
+            if not node.args and not node.keywords:
+                return base
+            pos: List[str] = []
+            for a in node.args:
+                val = _eval_stringish(a, resolvers)
+                if val is None:
+                    return None
+                pos.append(val)
+            kw: Dict[str, str] = {}
+            for kwarg in node.keywords or []:
+                if kwarg.arg is None:
+                    return None
+                val = _eval_stringish(kwarg.value, resolvers)
+                if val is None:
+                    return None
+                kw[kwarg.arg] = val
+            try:
+                return base.format(*pos, **kw)
+            except Exception:
+                return None
+        return None
+
+    return None
+
+def _gather_const_assigns(nodes: List[ast.stmt], inherited: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    env: Dict[str, str] = {} if inherited is None else dict(inherited)
+    for n in nodes:
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            v = _eval_stringish(n.value, [env])
+            if isinstance(v, str):
+                env[n.targets[0].id] = v
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None:
+            v = _eval_stringish(n.value, [env])
+            if isinstance(v, str):
+                env[n.target.id] = v
+    return env
+
+def _extract_prompt_via_ast(class_name: str, method_name: str) -> str:
+    src = _read_src()
+    mod = ast.parse(src)
+
+    module_consts = _gather_const_assigns(mod.body)
+
+    cls = None
+    for n in mod.body:
+        if isinstance(n, ast.ClassDef) and n.name == class_name:
+            cls = n
+            break
+    if cls is None:
+        _die(f"{class_name} not found in llm_agents.py.")
+
+    class_consts = _gather_const_assigns(cls.body, inherited=module_consts)
+
+    fn = None
+    for n in cls.body:
+        if isinstance(n, ast.FunctionDef) and n.name == method_name:
+            fn = n
+            break
+    if fn is None:
+        _die(f"{method_name} not found in {class_name}.")
+
+    locals_map: Dict[str, str] = {}
+    ret: Optional[str] = None
+
+    for stmt in fn.body:
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            continue
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            v = _eval_stringish(stmt.value, [locals_map, class_consts, module_consts])
+            if isinstance(v, str):
+                locals_map[stmt.targets[0].id] = v
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+            v = _eval_stringish(stmt.value, [locals_map, class_consts, module_consts])
+            if isinstance(v, str):
+                locals_map[stmt.target.id] = v
+        elif isinstance(stmt, ast.Return):
+            ret = _eval_stringish(stmt.value, [locals_map, class_consts, module_consts]) if stmt.value is not None else ""
+            break
+
+    if not isinstance(ret, str) or not ret.strip():
+        _die(f"Cannot statically evaluate {class_name}.{method_name}().")
+    return ret.strip()
+
+def _extract_prompt_via_runtime(class_name: str, method_name: str) -> str:
+    spec = importlib.util.spec_from_file_location("llm_agents_runtime", LLM_AGENTS_PY)
+    if spec is None or spec.loader is None:
+        _die("Failed to import llm_agents.py at runtime.")
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)  # type: ignore
+    cls = getattr(m, class_name, None)
+    if cls is None:
+        _die(f"{class_name} not found during runtime import.")
+    meth = getattr(cls, method_name, None)
+    if meth is None:
+        _die(f"{method_name} not found on {class_name} during runtime import.")
+    # Try static/class, then instance (no-arg)
+    try:
+        s = meth()  # type: ignore
+        if isinstance(s, str) and s.strip():
+            return s.strip()
+    except TypeError:
+        pass
+    try:
+        inst = cls()  # type: ignore
+        bound = getattr(inst, method_name)
+        s = bound()  # type: ignore
+        if isinstance(s, str) and s.strip():
+            return s.strip()
+    except Exception as e:
+        _die(f"Runtime probe failed for {class_name}.{method_name}(): {e}")
+    _die(f"Runtime probe produced empty text for {class_name}.{method_name}().")
+
+def _extract_or_probe_prompt(class_name: str, method_name: str) -> str:
+    try:
+        return _extract_prompt_via_ast(class_name, method_name)
+    except Exception as e_ast:
+        print(f"[PROMPT] AST extraction failed for {class_name}.{method_name}: {e_ast}\n[PROMPT] Falling back to runtime import probe...")
+        return _extract_prompt_via_runtime(class_name, method_name)
+
+# Pull both prompts (robust)
+TEXT_CONTEXT = _extract_or_probe_prompt("GuidedLLM", "build_user_prompt")
+VISUAL_CONTEXT = _extract_or_probe_prompt("VisualGuidedLLM", "build_game_context_prompt")
+
+def _assert_prompt_sane(kind: str, s: str) -> None:
+    if len(s) < 80:
+        _die(f"{kind} prompt is suspiciously short ({len(s)} chars).")
 
 # ----------------------------- training format utilities -----------------------------
 
-INCLUDE_GRIDS = True         # include numeric matrices
+INCLUDE_GRIDS = True         # include numeric matrices (disabled in --visual mode)
 RATIONAL_PREVIEW_CHARS = 500 # live preview length
 
 def _pretty_grid_3d(arr3d: List[List[List[int]]]) -> str:
@@ -259,101 +430,149 @@ class Block:
     post_state: str
     post_score: int
     post_grid: str
-    level_note: Optional[str] = None  # e.g., "LEVEL 1 COMPLETED → starting LEVEL 2"
-    cot: Optional[str] = None         # LLM rationale (longer planning/analysis)
+    level_note: Optional[str] = None
+    cot: Optional[str] = None
+    pre_img_path: Optional[Path] = None
+    post_img_path: Optional[Path] = None
+    pre_img_data_url: Optional[str] = None
+    post_img_data_url: Optional[str] = None
 
 # ----------------------------- example traces -----------------------------
-# Default: combinations L1×L2. We assume L1 is successful to unlock L2.
-# Use your successful L1 example twice (two names, same moves)
+
 TRACES_L1: List[Dict[str, Any]] = [
     {"name": "l1_success_a", "moves": ["Up", "Up", "Left", "Up", "Up"]},
     {"name": "l1_success_b", "moves": ["Up", "Up", "Left", "Up", "Up"]},
 ]
-# Two L2 examples (may or may not win)
 TRACES_L2: List[Dict[str, Any]] = [
     {"name": "l2_variant_a", "moves": ["Right", "Right", "Up", "Left", "Down"]},
     {"name": "l2_variant_b", "moves": ["Down", "Right", "Up", "Right", "Left"]},
 ]
 
-# ----------------------------- context builders (no duplication) -----------------------------
+# ----------------------------- context builders -----------------------------
 
-def _build_prev_chain(blocks: List[Block]) -> str:
+def _build_full_timeline(blocks: List[Block], focus_idx: int) -> str:
     """
-    Continuous chain with NO repeated 'current state' at the start of each step.
-    Layout:
-      INITIAL STATE
-      (for each completed step)
-        RATIONALE
-        MOVE
-        STATE AFTER (and optional LEVEL NOTE)
+    Build a compact transcript with ALL steps (past & future).
+    Include existing rationales for past steps if available; future ones have none.
+    Avoid redundant grids here; rely on single image attachment in visual mode.
     """
-    parts: List[str] = []
+    out: List[str] = []
     if blocks:
         b0 = blocks[0]
-        parts.append("## INITIAL STATE")
-        parts.append(f"GameState={b0.pre_state} | Score={b0.pre_score}")
-        if INCLUDE_GRIDS: parts.append("```\n" + b0.pre_grid + "\n```")
-        parts.append("")
+        out.append("## INITIAL STATE")
+        out.append(f"GameState={b0.pre_state} | Score={b0.pre_score}")
+        if INCLUDE_GRIDS and b0.pre_grid:
+            out.append("```\n" + b0.pre_grid + "\n```")
+        out.append("")
     for b in blocks:
-        parts.append(f"### Step {b.idx:02d}")
-        parts.append("RATIONALE:")
-        parts.append((b.cot or "(not available)"))
-        parts.append("")
-        parts.append("MOVE:")
-        parts.append(b.move)
-        parts.append("")
-        parts.append("STATE AFTER:")
-        parts.append(f"GameState={b.post_state} | Score={b.post_score}")
+        out.append(f"### Step {b.idx:02d}")
+        if b.cot:
+            out.append("RATIONALE (past):")
+            out.append(b.cot)
+            out.append("")
+        out.append(f"MOVE: {b.move}")
+        out.append(f"STATE AFTER: GameState={b.post_state} | Score={b.post_score}")
         if b.level_note:
-            parts.append(f">>> {b.level_note}")
-        if INCLUDE_GRIDS: parts.append("```\n" + b.post_grid + "\n```")
-        parts.append("")
-    return "\n".join(parts).strip()
+            out.append(f">>> {b.level_note}")
+        if INCLUDE_GRIDS and b.post_grid:
+            out.append("```\n" + b.post_grid + "\n```")
+        out.append("")
+    out.append(f"### Focus: Step {focus_idx:02d} (write rationale for THIS step only)")
+    out.append("Do NOT quote or cite future steps, even though you can see them below and above; use them only to infer plausible intent.")
+    return "\n".join(out).strip()
 
-def _build_messages_for_step(history_blocks: List[Block], current_block: Block) -> Tuple[str, str]:
+def _build_messages_for_step(blocks: List[Block], focus_idx: int) -> Tuple[str, str]:
     """
-    Returns (system_text, user_text)
-    Model sees a continuous chain up to the *previous* step (no duplicate 'current state' line),
-    then we append the CURRENT step's MOVE and STATE AFTER, and ask for a long, in-the-moment rationale
-    (≈8–12 sentences, or bullets of comparable length) justifying that move from the player’s perspective.
+    Text (non-visual) message builder with full (past+future) timeline context.
     """
-    prev_text = _build_prev_chain(history_blocks)  # includes INITIAL STATE and prior steps (with their rationales)
+    b = blocks[focus_idx]
+    timeline = _build_full_timeline(blocks, focus_idx)
 
     sys_text = (
         TEXT_CONTEXT
-        + "\n\nYou are writing natural reasoning notes for an LS20 gameplay transcript. "
-          "Do not output JSON or code. Use natural prose (or concise bullets). "
-          "Write from the player’s perspective at that moment: analyze the current state, "
-          "what matches vs. not yet, planned subgoals, obstacles (walls/paths), "
-          "and why the given MOVE is the right next step in this sequence."
-          "Keep in mind that if you won a level sometime in the future the key must've been matching so use that to verify if it is indeed matching with the distributions of 0s at the given level"
-          "Think deeply about this, if you're about to win in 2/3 moves, your key probably is matching "
+        + "\n\nYou are writing natural reasoning notes for an LS20 gameplay transcript."
+          " Your role is to write, in natural prose (or concise bullets), the rationale for a single move,"
+          " as if you were the player at that exact moment. Do not output JSON or code."
+          "\n\nGoal of the rationale:"
+          " Given the current state and the move that was taken, explain clearly and convincingly WHY that move made sense"
+          " at the time. The move does not need to be optimal nor guaranteed to lead to a win; your task is to supply"
+          " reasonable, game-aware justification for taking it then and there."
+          "\n\nAnalytic checklist (weigh all that apply):"
+          "\n  • Key ↔ Exit match: Carefully assess whether the bottom-left key indicator visually matches the exit’s target pattern."
+          "    If it matches (or if later success implies it must have matched), say so explicitly and prioritize heading to the exit."
+          "    Avoid the key generator once matched; route to the exit via legal corridors."
+          "\n  • Game dynamics & rules: Consider walls/legality of movement, corridor topology, proximity to generators/exit,"
+          "    remaining moves/energy, lives, and HUD cues."
+          "\n  • Subgoals & routing: Explain intermediate positioning (e.g., reaching corridors, avoiding generators when matched,"
+          "    or seeking generators when not matched), and why the chosen direction advances that plan."
+          "\n  • Consistency with outcomes: If a level completes soon after, acknowledge that the key must already have matched"
+          "    and show how this move aligns with beelining to the exit; if no progress followed, explain the hypothesis tested."
+          "\n\nSTRICT TRAINING RULE:"
+          " Do NOT reveal or mention the move in the body of your rationale. Defer stating the move name until the very end."
+          " Spend the beginning analyzing and thinking first."
+          "\n\nVoice and perspective:"
+          " Write in first person (e.g., “Looking at the state, I see… Therefore I…”). Ground claims in visible state and rules."
+          " Example of acceptable phrasing: “Ah, looking at the state, the key matches the exit, so I should focus on exiting."
+          " I appear to have enough moves, so I’ll head toward the exit without touching the generator…”"
+          "\n\nDeliverable:"
+          " A thoughtful paragraph (or a few concise bullets) integrating state, rules, and win conditions into a coherent"
+          " justification for why THIS MOVE was chosen now. **you may not state future knowledge, in this paragraph, the action which was take is deducible from the current and past states!** On the FINAL lines only, append: “Move: <Up/Down/Left/Right>”."
+          "Some examples of what not to say 'My key must already match the exit lock, as I'm on a direct path to victory.' or 'The level completes in the very next step, which tells me that my key must already match the exit's lock pattern. '"
+          " this is crazy, you are writing as the person playing the game who shouldn't have access to the future (although I give it to you to help play this role),"
+          "this means you must just look at the game and see 'Looking at the key and the exit lock it seems we are matching so I can proceed...'. Understand the game and your role in providing reasoning "
     )
 
-    b = current_block
-    cur_parts: List[str] = []
-    if prev_text:
-        cur_parts += [prev_text, ""]
-    cur_parts += [
-        f"### Step {b.idx:02d}",
-        "MOVE:",
-        b.move,
+    user_text = "\n".join([
+        timeline,
         "",
-        "STATE AFTER:",
-        f"GameState={b.post_state} | Score={b.post_score}",
-    ]
-    if b.level_note:
-        cur_parts.append(f">>> {b.level_note}")
-    if INCLUDE_GRIDS:
-        cur_parts += ["```\n" + b.post_grid + "\n```"]
-    cur_parts += [
-        "",
-        "Write a detailed RATIONALE (about 8–12 sentences, or a comparable number of concise bullets) "
-        "analyzing the current state and justifying the shown MOVE as the best next action. "
-        "Discuss matching vs. not yet matching, layout constraints, pathing, subgoals, and plan forward."
-    ]
-    user_text = "\n".join(cur_parts).strip()
+        f"# Current step = {b.idx:02d}",
+        f"(For your final line only) MOVE: {b.move}",
+        "STATE BEFORE is the immediately preceding state in the transcript; use it to reason but do not repeat images here.",
+    ]).strip()
+
     return sys_text, user_text
+
+def _build_visual_messages_for_step(blocks: List[Block], focus_idx: int) -> Tuple[str, str]:
+    """
+    Visual message builder with full (past+future) timeline context.
+    We attach ONLY the single 'state BEFORE' image for the focus step to avoid duplicate pre/post images.
+    """
+    b = blocks[focus_idx]
+    timeline = _build_full_timeline(blocks, focus_idx)
+
+    system = (
+        VISUAL_CONTEXT
+        + "\n\nYou are annotating a past move (not choosing a new action)."
+          "\n\nGoal of the rationale:"
+          " Given the displayed CURRENT state (image) and the move that was taken, explain WHY that move made sense at the time."
+          " It need not be optimal—provide reasonable, game-aware justification."
+          "\n\nAnalytic checklist (weigh all that apply):"
+          "\n  • Key ↔ Exit match: visually check the indicator vs the exit; if matched (or implied by later success),"
+          "    prioritize routing to exit and avoid the generator."
+          "\n  • Legality & topology: walls, corridors, reachable paths; remaining moves/energy; lives; proximity to exit/generator."
+          "\n  • Plan & routing: why this direction advances the plan now."
+          "\n  • Outcomes consistency: use knowledge that the future sequence succeeds/doesn’t to refine your reconstruction,"
+          "    but DO NOT reference future steps explicitly in your written rationale."
+          "\n\nSTRICT TRAINING RULE:"
+          " Do NOT reveal or mention the move in the body. Leave the move name for the final lines only."
+          " Spend the opening on analysis and thinking."
+          "\n\nVoice and perspective:"
+          " First person, grounded in visible shapes/colors and known rules."
+          "\n\nDeliverable:"
+          " A coherent paragraph (or concise bullets) justifying THIS MOVE now. On the final lines only, state the move:"
+          " “Move: <Up/Down/Left/Right>”."
+    )
+
+    user_text = "\n".join([
+        "# FULL TRANSCRIPT SUMMARY (past + future available; do not cite future explicitly)",
+        timeline,
+        "",
+        f"# Current step = {b.idx:02d}",
+        f"(For your final line only) MOVE: {b.move}",
+        "An image of the CURRENT state (before this move) is attached below.",
+    ]).strip()
+
+    return system, user_text
 
 # ----------------------------- LLM backends -----------------------------
 
@@ -370,7 +589,6 @@ def _call_openai(system_text: str, user_text: str) -> str:
     if not key:
         _die("OPENAI_API_KEY is missing. Put it in .env at repo root (no quotes).")
     client = OpenAI(api_key=key)
-    # GPT-5; no temperature; can pass reasoning_effort
     resp = client.chat.completions.create(
         model="gpt-5",
         messages=[{"role": "system", "content": system_text},
@@ -384,7 +602,7 @@ def _ensure_genai():
     if _GENAI is None:
         try:
             import google.generativeai as genai  # type: ignore
-        except Exception as e:
+        except Exception:
             _die("google-generativeai is not installed. Install with `uv add google-generativeai` or `pip install google-generativeai`.")
         key = os.getenv("GEMINI_API_KEY", "").strip()
         if not key:
@@ -395,14 +613,10 @@ def _ensure_genai():
 
 def _call_gemini(system_text: str, user_text: str) -> str:
     genai = _ensure_genai()
-    # Use Gemini 2.5 Pro, no temperature
     model = genai.GenerativeModel(model_name="gemini-2.5-pro", system_instruction=system_text)
-    # For text-only, a single string is fine
     resp = model.generate_content(user_text)
-    # google-generativeai returns .text on success
     out = getattr(resp, "text", "") or ""
     if not out and getattr(resp, "candidates", None):
-        # Fallback: attempt to join text parts
         try:
             parts = resp.candidates[0].content.parts  # type: ignore
             out = "".join(getattr(p, "text", "") for p in parts)
@@ -417,11 +631,102 @@ def _call_llm(backend: str, system_text: str, user_text: str) -> str:
         return _call_gemini(system_text, user_text)
     return _call_openai(system_text, user_text)
 
+# --- visual LLM calls ---
+
+def _call_openai_visual(system_text: str, user_text: str, images_data_urls: List[str]) -> str:
+    if OpenAI is None:
+        _die("openai python SDK not installed. Install it or choose --backend gemini.")
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        _die("OPENAI_API_KEY is missing. Put it in .env at repo root (no quotes).")
+    client = OpenAI(api_key=key)
+    content: List[Dict[str, Any]] = [{"type": "text", "text": user_text}]
+    for url in images_data_urls:
+        if not url:
+            continue
+        content.append({"type": "image_url", "image_url": {"url": url, "detail": "high"}})
+    resp = client.chat.completions.create(
+        model="gpt-5",
+        messages=[{"role": "system", "content": system_text},
+                  {"role": "user", "content": content}],
+        reasoning_effort="low",
+    )
+    return (resp.choices[0].message.content or "").strip()
+
+def _call_gemini_visual(system_text: str, user_text: str, image_paths: List[Optional[Path]]) -> str:
+    genai = _ensure_genai()
+    model = genai.GenerativeModel(model_name="gemini-2.5-pro", system_instruction=system_text)
+    parts: List[Any] = [user_text]
+    for p in image_paths:
+        if not p:
+            continue
+        try:
+            img = Image.open(str(p))
+            parts.append(img)
+        except Exception:
+            continue
+    resp = model.generate_content(parts)
+    out = getattr(resp, "text", "") or ""
+    if not out and getattr(resp, "candidates", None):
+        try:
+            parts2 = resp.candidates[0].content.parts  # type: ignore
+            out = "".join(getattr(pt, "text", "") for pt in parts2)
+        except Exception:
+            pass
+    if not out:
+        _die("Gemini returned empty text in visual mode.")
+    return out.strip()
+
+def _call_llm_visual(backend: str, system_text: str, user_text: str, *, data_urls: List[str], paths: List[Optional[Path]]) -> str:
+    if backend == "gemini":
+        return _call_gemini_visual(system_text, user_text, paths)
+    return _call_openai_visual(system_text, user_text, data_urls)
+
+# ----------------------------- image helpers (visual mode) -----------------------------
+
+def _last_grid(arr3d: List[List[List[int]]]) -> List[List[int]]:
+    if not arr3d:
+        return []
+    g = arr3d[-1] or arr3d[0]
+    if not g or not isinstance(g, list) or not g or not isinstance(g[0], list):
+        return []
+    return g
+
+def _grid_to_png_bytes(grid: List[List[int]]) -> bytes:
+    KEY_COLORS = {
+        0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999",
+        3: "#666666", 4: "#333333", 5: "#000000",
+        6: "#E53AA3", 7: "#FF7BCC", 8: "#F93C31",
+        9: "#1E93FF", 10: "#88D8F1", 11: "#FFDC00",
+        12: "#FF851B", 13: "#921231", 14: "#4FCC30",
+        15: "#A356D6",
+    }
+    def _hex_to_rgb(hex_str: str) -> tuple[int, int, int]:
+        hex_str = hex_str.strip()
+        if not hex_str.startswith("#") or len(hex_str) != 7:
+            return (136, 136, 136)
+        return (int(hex_str[1:3], 16), int(hex_str[3:5], 16), int(hex_str[5:7], 16))
+    h = len(grid)
+    w = len(grid[0]) if h else 0
+    im = Image.new("RGB", (w, h), (0, 0, 0))
+    px = im.load()
+    for y, row in enumerate(grid):
+        for x, val in enumerate(row):
+            rgb = _hex_to_rgb(KEY_COLORS.get((val & 15), "#888888"))
+            px[x, y] = rgb
+    buf = io.BytesIO()
+    im.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+def _b64_data_url(png_bytes: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+
 # ----------------------------- combo run (L1 × L2) -----------------------------
 
 def _combo_out_dir(ts_root: Path, l1_name: str, l2_name: str) -> Path:
     d = ts_root / "annotated_manual_traces" / "combos" / f"{l1_name}__x__{l2_name}"
     d.mkdir(parents=True, exist_ok=True)
+    (d / "images").mkdir(exist_ok=True)
     return d
 
 def _ts_root() -> Path:
@@ -430,6 +735,20 @@ def _ts_root() -> Path:
     root = base / stamp
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+def _write_prompt_files(out_dir: Path, *, text_prompt: str, visual_prompt: str, print_full: bool) -> None:
+    tp = out_dir / "text_system_prompt.txt"
+    vp = out_dir / "visual_system_prompt.txt"
+    tp.write_text(text_prompt, encoding="utf-8")
+    vp.write_text(visual_prompt, encoding="utf-8")
+    def _preview(label: str, s: str) -> None:
+        print(f"\n[DEBUG] {label} system prompt ({len(s)} chars):")
+        if print_full:
+            print(s)
+        else:
+            print(s[:800] + ("…" if len(s) > 800 else ""))
+    _preview("TEXT", text_prompt)
+    _preview("VISUAL", visual_prompt)
 
 def _run_one_combo(
     *,
@@ -440,6 +759,8 @@ def _run_one_combo(
     flat_sft: bool,
     ts_root: Path,
     backend: str,
+    visual: bool,
+    print_prompts: bool,
 ) -> None:
     out_dir = _combo_out_dir(ts_root, l1["name"], l2["name"])
     arc = ARCClient(game_id=game_id, out_dir=out_dir, print_frame_json=print_frame_json)
@@ -449,7 +770,13 @@ def _run_one_combo(
     if game_id not in games:
         _die(f"Game '{game_id}' not in /api/games for this key. Available: {games}")
 
-    arc.open_scorecard(tags=["agent", f"manual-text-interleaved-{backend}", f"{l1['name']}__x__{l2['name']}"])
+    tag = "manual-visual-interleaved" if visual else "manual-text-interleaved"
+    arc.open_scorecard(tags=["agent", f"{tag}-{backend}", f"{l1['name']}__x__{l2['name']}"])
+
+    # Prompts: assert + persist + preview
+    _assert_prompt_sane("text", TEXT_CONTEXT)
+    _assert_prompt_sane("visual", VISUAL_CONTEXT)
+    _write_prompt_files(out_dir, text_prompt=TEXT_CONTEXT, visual_prompt=VISUAL_CONTEXT, print_full=print_prompts)
 
     blocks: List[Block] = []
     try:
@@ -458,7 +785,21 @@ def _run_one_combo(
         level_counter = 1
         last_score = int(pre.get("score", 0))
 
-        # L1 moves (assumed successful)
+        # Helper to render & save per-state PNGs (visual mode)
+        def _save_image_for(frame_obj: Dict[str, Any], prefix: str) -> Tuple[Optional[Path], Optional[str]]:
+            try:
+                grid = _last_grid(frame_obj.get("frame") or [])
+                if not grid or not grid[0]:
+                    return (None, None)
+                png = _grid_to_png_bytes(grid)
+                path = out_dir / "images" / f"{prefix}.png"
+                with open(path, "wb") as f:
+                    f.write(png)
+                return (path, _b64_data_url(png))
+            except Exception:
+                return (None, None)
+
+        # L1 moves
         for mv in l1["moves"]:
             post = arc.move(_to_action_name(_norm_move(mv)))
             pre_state = str(pre.get("state"))
@@ -472,6 +813,12 @@ def _run_one_combo(
                 level_counter += 1
                 last_score = post_score
 
+            pre_path = post_path = None
+            pre_url = post_url = None
+            if visual:
+                pre_path, pre_url = _save_image_for(pre, f"{len(blocks):02d}-pre")
+                post_path, post_url = _save_image_for(post, f"{len(blocks):02d}-post")
+
             blocks.append(Block(
                 idx=len(blocks),
                 move=_norm_move(mv),
@@ -482,10 +829,12 @@ def _run_one_combo(
                 post_score=post_score,
                 post_grid=_pretty_grid_3d(post.get("frame") or []) if INCLUDE_GRIDS else "",
                 level_note=level_note,
+                pre_img_path=pre_path, post_img_path=post_path,
+                pre_img_data_url=pre_url, post_img_data_url=post_url,
             ))
             pre = post
 
-        # L2 moves (may or may not succeed)
+        # L2 moves
         for mv in l2["moves"]:
             post = arc.move(_to_action_name(_norm_move(mv)))
             pre_state = str(pre.get("state"))
@@ -499,6 +848,12 @@ def _run_one_combo(
                 level_counter += 1
                 last_score = post_score
 
+            pre_path = post_path = None
+            pre_url = post_url = None
+            if visual:
+                pre_path, pre_url = _save_image_for(pre, f"{len(blocks):02d}-pre")
+                post_path, post_url = _save_image_for(post, f"{len(blocks):02d}-post")
+
             blocks.append(Block(
                 idx=len(blocks),
                 move=_norm_move(mv),
@@ -509,16 +864,17 @@ def _run_one_combo(
                 post_score=post_score,
                 post_grid=_pretty_grid_3d(post.get("frame") or []) if INCLUDE_GRIDS else "",
                 level_note=level_note,
+                pre_img_path=pre_path, post_img_path=post_path,
+                pre_img_data_url=pre_url, post_img_data_url=post_url,
             ))
             pre = post
 
-        # Annotate each step (interleaved; no state repetition)
+        # Annotate each step
         annot_path = out_dir / "interleaved.jsonl"
         md_path = out_dir / "interleaved.md"
         flat_path = out_dir / "sft.jsonl" if flat_sft else None
 
         with open(annot_path, "a", encoding="utf-8") as annot, open(md_path, "a", encoding="utf-8") as md:
-            # Markdown header with INITIAL STATE (printed once)
             if blocks:
                 md.write(f"# LS20 Interleaved Transcript — {l1['name']}__x__{l2['name']} ({datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')})\n\n")
                 b0 = blocks[0]
@@ -528,18 +884,28 @@ def _run_one_combo(
                     md.write("```\n" + b0.pre_grid + "\n```\n\n")
 
             for idx, b in enumerate(blocks):
-                sys_text, user_text = _build_messages_for_step(blocks[:idx], b)
-                text = _call_llm(backend, sys_text, user_text)
+                if visual:
+                    sys_text, user_text = _build_visual_messages_for_step(blocks, idx)
+                    # Attach ONLY the 'state BEFORE' image for the focus step to avoid duplicate pre/post images
+                    text = _call_llm_visual(
+                        backend,
+                        sys_text,
+                        user_text,
+                        data_urls=[b.pre_img_data_url or ""],
+                        paths=[b.pre_img_path],
+                    )
+                else:
+                    sys_text, user_text = _build_messages_for_step(blocks, idx)
+                    text = _call_llm(backend, sys_text, user_text)
+
                 if not text:
                     _die(f"LLM returned empty rationale at step {idx}.")
 
                 b.cot = text
 
-                # live preview (first 500 chars)
                 preview = text[:RATIONAL_PREVIEW_CHARS].replace("\n", " ")
                 print(f"[LLM:{backend}] step {idx:02d} preview: {preview}{'…' if len(text) > RATIONAL_PREVIEW_CHARS else ''}")
 
-                # JSONL row with explicit ARC states
                 row = {
                     "combo": f"{l1['name']}__x__{l2['name']}",
                     "index": b.idx,
@@ -553,7 +919,6 @@ def _run_one_combo(
                 }
                 annot.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-                # Append to markdown without repeating current state at the start of next step
                 md.write(f"### Step {b.idx:02d}\n\n")
                 md.write("**RATIONALE**\n\n")
                 md.write(b.cot + "\n\n")
@@ -565,12 +930,17 @@ def _run_one_combo(
                     md.write(f">>> {b.level_note}\n\n")
                 if INCLUDE_GRIDS:
                     md.write("```\n" + b.post_grid + "\n```\n\n")
+                if visual and (b.pre_img_path or b.post_img_path):
+                    md.write("**IMAGES (this step)**\n\n")
+                    if b.pre_img_path:
+                        md.write(f"Pre:\n\n![]({(b.pre_img_path).as_posix()})\n\n")
+                    if b.post_img_path:
+                        md.write(f"Post:\n\n![]({(b.post_img_path).as_posix()})\n\n")
 
                 if flat_path is not None:
                     with open(flat_path, "a", encoding="utf-8") as flat:
                         flat.write(json.dumps({"move": b.move, "cot": b.cot}, ensure_ascii=False) + "\n")
 
-        # Terminal links to outputs (absolute paths)
         print("\n[links]")
         print(f"  arc frames:     {out_dir.resolve() / 'arc_frames.jsonl'}")
         print(f"  jsonl interlv:  {out_dir.resolve() / 'interleaved.jsonl'}")
@@ -586,11 +956,13 @@ def _run_one_combo(
 # ----------------------------- CLI & driver -----------------------------
 
 def _parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="LS20 L1×L2 combinations → ARC states → interleaved textual rationales.")
+    p = argparse.ArgumentParser(description="LS20 L1×L2 combinations → ARC states → interleaved rationales (text or visual).")
     p.add_argument("--game", type=str, default="ls20-fa137e247ce6", help="ARC game_id (default: ls20-fa137e247ce6)")
     p.add_argument("--print-frame-json", action="store_true", help="Print full ARC frame JSON to console (verbose).")
     p.add_argument("--flat-sft", action="store_true", help="Also write sft.jsonl with flat {move,cot} rows.")
     p.add_argument("--backend", type=str, choices=["openai", "gemini"], default=None, help="LLM backend (default from LLM_BACKEND env, else openai).")
+    p.add_argument("--visual", action="store_true", help="Enable visual mode (images instead of numeric matrices).")
+    p.add_argument("--print-prompts", action="store_true", help="Print FULL extracted prompts (also saved to files in each combo dir).")
     return p.parse_args()
 
 def main() -> None:
@@ -598,7 +970,6 @@ def main() -> None:
 
     if not os.getenv("ARC_API_KEY"):
         _die("ARC_API_KEY missing in env.")
-    # Only require the key for the selected backend
     backend = _llm_backend(args.backend)
     if backend == "openai" and not os.getenv("OPENAI_API_KEY"):
         _die("OPENAI_API_KEY missing in env (or choose --backend gemini).")
@@ -607,6 +978,11 @@ def main() -> None:
 
     ts_root = Path(os.getenv("TRANSCRIPTS_DIR", "transcripts")).resolve() / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     ts_root.mkdir(parents=True, exist_ok=True)
+
+    # In visual mode we suppress numeric matrices in prompts/markdown
+    global INCLUDE_GRIDS
+    if args.visual:
+        INCLUDE_GRIDS = False
 
     # Default = combinations (Cartesian product). For 2×2 → 4 combos.
     for l1 in TRACES_L1:
@@ -621,6 +997,8 @@ def main() -> None:
                 flat_sft=args.flat_sft,
                 ts_root=ts_root,
                 backend=backend,
+                visual=args.visual,
+                print_prompts=args.print_prompts,
             )
 
 if __name__ == "__main__":
