@@ -13,12 +13,15 @@ except Exception:
     if str(repo_root) not in sys.path:
         sys.path.insert(0, str(repo_root))
     from agents.templates.as66.downsample import downsample_4x4, to_block_matrix_str
-
+    
 KEY_COLORS = {
-    0:"#FFFFFF",1:"#CCCCCC",2:"#999999",3:"#666666",4:"#333333",5:"#000000",
-    6:"#E53AA3",7:"#FF7BCC",8:"#F93C31",9:"#1E93FF",10:"#88D8F1",11:"#FFDC00",
-    12:"#FF851B",13:"#921231",14:"#4FCC30",15:"#A356D6",
-}
+        0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999",
+        3: "#666666", 4: "#333333", 5: "#000000",
+        6: "#E53AA3", 7: "#FF7BCC", 8: "#F93C31",
+        9: "#1E93FF", 10: "#88D8F1", 11: "#FFDC00",
+        12: "#FF851B", 13: "#921231", 14: "#4FCC30",
+        15: "#A356D6",
+    }
 def _rgb(h): return (int(h[1:3],16), int(h[3:5],16), int(h[5:7],16))
 
 def _root_url()->str:
