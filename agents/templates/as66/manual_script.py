@@ -1,22 +1,27 @@
 """
 AS66 manual script runner → multi-turn SFT conversations for *playing the game*.
 
-What this version does:
-  • Runs scripted candidates (Cartesian products per level) with laddering.
-  • For each episode (candidate), emits ONE multi-turn conversation JSONL record:
-      - system: unified primer (observation rules + function-calling instructions)
-      - step loop:
-          user: provides current 16×16 state + score + step
-          assistant: multi-paragraph OBSERVATION in content + a single tool_call (ACTION1..4)
-          tool: environment result with post-state scoreboard + 16×16 matrix
-  • Rationale is IMPUTED (can use future knowledge, but phrased as if at the step).
-  • Generates artifacts under transcripts/<stamp>/as66/:
-      - sft_multi_turn.jsonl   ← used by trainer
-      - interleaved.md         ← human-readable
-      - rows.jsonl             ← low-level step log
-      - images/                ← optional 16×16 PNGs per step (vision variant)
+Goal (this version):
+  • Generate the GLOBAL CARTESIAN PRODUCT of vetted ways across levels.
+    If L1 has A ways, L2 has B ways, L3 has C ways, ... → produce A×B×C×... distinct
+    episodes. Each episode starts from RESET and executes the chosen way for L1,
+    then chosen way for L2, etc., producing an independent annotated conversation.
 
-TEXT-ONLY CONTRACT: integer codes only (no colors in observations).
+Parallelism:
+  • Controlled by env:
+      MANUAL_MAX_WORKERS=25    (default 25)
+      MANUAL_PARALLEL=1        (enable parallel execution; default ON here)
+  • Each combo runs independently with its own HTTP session/guid.
+  • File writes are serialized with a lock.
+
+Outputs per run under transcripts/<stamp>/as66/:
+  - sft_multi_turn.jsonl   ← one line per combo (episode)
+  - interleaved.md         ← readable transcript for all combos
+  - rows.jsonl             ← low-level step log for all combos
+
+OBSERVATION text:
+  - Uses build_primer_system_text()/build_user_step_text() via prompts_sft.py
+  - Annotator model: gpt-5 (if OPENAI_API_KEY set); otherwise stub text.
 """
 
 from __future__ import annotations
@@ -29,29 +34,61 @@ import itertools
 import json
 import os
 import uuid
+from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import requests
 
 from openai import OpenAI
 
 from ...agent import Agent
 from ...structs import GameAction, GameState, FrameData
-from .downsample import downsample_4x4, matrix16_to_lines, ds16_png_bytes
+from .downsample import downsample_4x4, matrix16_to_lines
 from .prompts_sft import build_primer_system_text, build_user_step_text
 
-# ----------------------------- Per-level Cartesian products (edit here) -----------------------------
+# ----------------------------- Vetted WAYS per level -----------------------------
+# Each level key maps to a LIST OF WAYS; each way is a LIST OF MOVES (strings).
+# Edit these to your vetted sequences. (I folded your l2a..l2e etc. under "l2"/"l3"/"l4".)
 
-TRACE_LIBRARY: dict[str, List[List[str]]] = {
-    "l1": [["Down"], ["Left"], ["Down"]],
-    "l2": [["Right"], ["Down"], ["Left"]],
-    # Add more levels with options as needed
+WAYS_BY_LEVEL: dict[str, List[List[str]]] = {
+    "l1": [
+        ["Down", "Left", "Down"],
+        # Add a second way here if you have it, e.g.:
+        # ["Up","Right","Down"]
+    ],
+    "l2": [
+        ["Right","Down","Left"],                                        # l2a
+        ["Down","Left","Up","Right","Down","Left"],                    # l2b
+        ["Up","Down","Left","Down","Right","Up","Right"],              # l2c
+        ["Right","Up","Right","Down","Left"],                          # l2d
+        ["Down","Left","Up","Right","Up","Down","Left"],               # l2e
+    ],
+    "l3": [
+        ["Right","Down","Right","Down","Left","Right","Left","Up"],    # l3a
+        ["Down","Left","Up","Right","Left","Right","Left","Right","Up"],# l3b
+        ["Right","Down","Right","Down","Right","Left","Up"],           # l3c
+    ],
+    "l4": [
+        ["Left","Up","Down","Up","Left","Up"],                         # l4a
+        ["Left","Up","Left","Up"],                                     # l4b
+        ["Up","Left","Down","Left","Up"],                              # l4c
+    ],
 }
-LEVEL_ORDER: List[str] = ["l1", "l2"]
+
+LEVEL_ORDER: List[str] = ["l1", "l2", "l3", "l4"]
+
+# ----------------------------- Parallel config -----------------------------
+
+PARALLEL: bool = os.getenv("MANUAL_PARALLEL", "1").strip().lower() in ("1", "true", "yes", "on")
+MAX_WORKERS: int = int(os.getenv("MANUAL_MAX_WORKERS", "25"))
+WRITE_LOCK = threading.Lock()  # serialize file writes
 
 # -------------------------------------- Data models --------------------------------------
 
 @dataclass
 class StepRow:
     level: str
-    candidate_index: int
+    combo_id: str
     step_index: int
     move: str
     pre_state: str
@@ -65,6 +102,7 @@ class StepRow:
 @dataclass
 class Block:
     idx: int
+    level: str
     move: str
     pre_state: str
     pre_score: int
@@ -75,243 +113,295 @@ class Block:
     level_note: Optional[str] = None
     observation: Optional[str] = None  # imputed observation text
 
-# ----------------------------- Tool schemas for ACTION1..4 (OpenAI style) -----------------------------
+@dataclass
+class EpisodeResult:
+    combo_key: str            # e.g., "l1w1_l2w3_l3w2_l4w1"
+    conversation: List[Dict[str, Any]]
+    blocks: List[Block]
+    rows: List[StepRow]
+
+# ----------------------------- Tool schemas for ACTION1..4 -----------------------------
 
 TOOL_SCHEMAS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "ACTION1",
-            "description": "Move Up",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ACTION2",
-            "description": "Move Down",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ACTION3",
-            "description": "Move Left",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "ACTION4",
-            "description": "Move Right",
-            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
-        },
-    },
+    {"type": "function", "function": {"name": "ACTION1", "description": "Move Up",    "parameters": {"type":"object","properties":{},"additionalProperties": False}}},
+    {"type": "function", "function": {"name": "ACTION2", "description": "Move Down",  "parameters": {"type":"object","properties":{},"additionalProperties": False}}},
+    {"type": "function", "function": {"name": "ACTION3", "description": "Move Left",  "parameters": {"type":"object","properties":{},"additionalProperties": False}}},
+    {"type": "function", "function": {"name": "ACTION4", "description": "Move Right", "parameters": {"type":"object","properties":{},"additionalProperties": False}}},
 ]
 
-# ----------------------------- Manual runner -----------------------------
+# ----------------------------- Isolated env client (one per episode) -----------------------------
+
+class _EnvClient:
+    def __init__(self, root_url: str, game_id: str, card_id: str, headers: Dict[str, str], cookies) -> None:
+        self.root = root_url
+        self.game_id = game_id
+        self.card_id = card_id
+        self.sess = requests.Session()
+        self.sess.headers.update(headers)
+        self.sess.cookies = deepcopy(cookies)
+        self.guid: Optional[str] = None
+
+    def _post(self, cmd: str, payload: Dict[str, Any]) -> FrameData:
+        r = self.sess.post(f"{self.root}/api/cmd/{cmd}", json=payload, timeout=60)
+        data = r.json()
+        if "guid" in data and data["guid"]:
+            self.guid = data["guid"]
+        return FrameData.model_validate(data)
+
+    def reset(self) -> FrameData:
+        return self._post("RESET", {"card_id": self.card_id, "game_id": self.game_id})
+
+    def act(self, action_name: str) -> FrameData:
+        payload: Dict[str, Any] = {"game_id": self.game_id}
+        if self.guid:
+            payload["guid"] = self.guid
+        return self._post(action_name, payload)
+
+# ----------------------------- Manual runner (Cartesian across levels) -----------------------------
 
 class AS66ManualScriptBase(Agent):
     """
     Produces multi-turn SFT conversations where the assistant writes an OBSERVATION
     (multi-paragraph) and calls exactly one ACTIONn tool each turn.
+
+    NEW: Generates global Cartesian product across WAYS_BY_LEVEL[LEVEL_ORDER].
+    Each combo is an independent episode from RESET.
     """
     USE_IMAGES: bool = False
 
-    # Satisfy ABC; we run our own loop
     def is_done(self, frames: List[FrameData], latest_frame: FrameData) -> bool:
+        # We don't "play" in this Agent; we orchestrate offline episode generation.
         return True
 
     def choose_action(self, frames: List[FrameData], latest_frame: FrameData) -> GameAction:
         return GameAction.ACTION5
 
-    def main(self) -> None:
-        out = self._prepare_outdir()
-        md_path = self._out_dir / "interleaved.md"
-        sft_path = self._out_dir / "sft_multi_turn.jsonl"
-        rows_path = self._rows_path
+    # ------------------------ main entry ------------------------
 
-        md = open(md_path, "a", encoding="utf-8")
-        sft = open(sft_path, "a", encoding="utf-8")
+    def main(self) -> None:
+        self._prepare_outdir()
+        self._md_path = self._out_dir / "interleaved.md"
+        self._sft_path = self._out_dir / "sft_multi_turn.jsonl"
+        self._rows_path = self._rows_path
+
+        # open files once; writes are serialized with WRITE_LOCK
+        self._md = open(self._md_path, "a", encoding="utf-8")
+        self._sft = open(self._sft_path, "a", encoding="utf-8")
 
         try:
-            prefix: List[str] = []  # laddering across levels
-            md.write(f"# AS66 Multi-Turn Conversations — {datetime.utcnow().isoformat()}Z\n\n")
-
-            for level in LEVEL_ORDER:
-                options = TRACE_LIBRARY[level]
-                candidates = list(itertools.product(*options))
-                level_solved = False
-
-                for ci, cand in enumerate(candidates, start=1):
-                    # RESET, then ladder via discovered winning prefix
-                    f = self.take_action(GameAction.RESET)
-                    if f: self.append_frame(f)
-                    for mv in prefix:
-                        f = self.take_action(self._mv_to_action(mv))
-                        if f: self.append_frame(f)
-
-                    # Build a conversation for this candidate
-                    conversation: List[Dict[str, Any]] = []
-                    # System primer once per episode
-                    conversation.append({"role": "system", "content": build_primer_system_text()})
-
-                    # Create initial "user" message with current state
-                    if self.frames and self.frames[-1].frame:
-                        ds16_pre = downsample_4x4(self.frames[-1].frame, round_to_int=True)
-                    else:
-                        ds16_pre = []
-                    conversation.append({
-                        "role": "user",
-                        "content": build_user_step_text(ds16_pre, self.score, step=0, note="Initial state"),
-                    })
-
-                    # Episode header in markdown
-                    md.write(f"## Candidate {level}-cand{ci:02d}\n\n")
-
-                    pre_score = self.score
-                    last_pre_state = self.state.name
-                    last_ds16_lines = matrix16_to_lines(ds16_pre) if ds16_pre else "(empty)"
-
-                    cand_blocks: List[Block] = []
-
-                    # Execute candidate moves
-                    for mv in cand:
-                        # Call environment
-                        f = self.take_action(self._mv_to_action(mv))
-                        if not f:
-                            break
-                        self.append_frame(f)
-
-                        ds16_post = downsample_4x4(f.frame, round_to_int=True)
-                        ds16_post_lines = matrix16_to_lines(ds16_post)
-
-                        # Prepare step row and block
-                        step_row = StepRow(
-                            level=level, candidate_index=ci, step_index=self.action_counter,
-                            move=mv, pre_state=last_pre_state, pre_score=pre_score,
-                            post_state=f.state.name, post_score=f.score,
-                            ds16_pre=last_ds16_lines, ds16_post=ds16_post_lines, level_note=None,
-                        )
-                        if f.score > pre_score:
-                            step_row.level_note = "LEVEL UP"
-                            pre_score = f.score
-                        if f.state is GameState.GAME_OVER:
-                            step_row.level_note = (step_row.level_note + " | GAME OVER") if step_row.level_note else "GAME OVER"
-
-                        with open(rows_path, "a", encoding="utf-8") as rf:
-                            rf.write(json.dumps(step_row.__dict__, ensure_ascii=False) + "\n")
-
-                        block = Block(
-                            idx=len(cand_blocks),
-                            move=mv,
-                            pre_state=step_row.pre_state,
-                            pre_score=step_row.pre_score,
-                            post_state=step_row.post_state,
-                            post_score=step_row.post_score,
-                            ds16_pre=step_row.ds16_pre,
-                            ds16_post=step_row.ds16_post,
-                            level_note=step_row.level_note,
-                        )
-                        cand_blocks.append(block)
-
-                        # 1) Assistant OBSERVATION + tool call (imputed observation)
-                        assistant_obs = self._impute_observation_text(
-                            ds16_lines=block.ds16_pre,
-                            score=block.pre_score,
-                            step=len(cand_blocks)-1,
-                            full_timeline=cand_blocks,
-                        )
-                        action_name = self._move_to_action_name(mv)
-                        tool_call_id = str(uuid.uuid4())
-                        conversation.append({
-                            "role": "assistant",
-                            "content": assistant_obs,
-                            "tool_calls": [
-                                {"id": tool_call_id, "type": "function", "function": {"name": action_name, "arguments": {}}}
-                            ],
-                        })
-
-                        # 2) Tool message: environment result
-                        tool_content = (
-                            f"RESULT for {action_name}:\n"
-                            f"PostState={block.post_state} | Score={block.post_score}\n"
-                            f"Matrix 16x16 (integer codes):\n{block.ds16_post}\n"
-                        )
-                        conversation.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": action_name,
-                            "content": tool_content,
-                        })
-
-                        # Optional image
-                        if self.USE_IMAGES:
-                            try:
-                                png = ds16_png_bytes(ds16_post, cell=22)
-                                (self._out_dir / "images" / f"{level}-cand{ci:02d}-step{block.idx:03d}.png").write_bytes(png)
-                            except Exception:
-                                pass
-
-                        # Markdown transcript
-                        md.write(f"### Step {block.idx:02d}\n\n")
-                        md.write(f"**MOVE (target)**: {mv}\n\n")
-                        md.write("**OBSERVATION (imputed)**\n\n")
-                        md.write(assistant_obs + "\n\n")
-                        md.write("**STATE AFTER**\n\n")
-                        md.write(f"GameState={block.post_state} | Score={block.post_score}\n\n")
-                        md.write("```\n" + block.ds16_post + "\n```\n\n")
-
-                        # Prepare next loop
-                        last_pre_state = block.post_state
-                        last_ds16_lines = block.ds16_post
-
-                        if f.state is GameState.GAME_OVER:
-                            break
-
-                        # Insert next user step input (so the assistant continues)
-                        conversation.append({
-                            "role": "user",
-                            "content": build_user_step_text(ds16_post, f.score, step=len(cand_blocks), note=block.level_note),
-                        })
-
-                    # Write one JSONL record per episode
-                    sft.write(json.dumps({
-                        "id": f"{level}-cand{ci:02d}",
-                        "messages": conversation,
-                        "tools": TOOL_SCHEMAS,
-                        "meta": {"level": level, "candidate": ci, "steps": len(cand_blocks)},
-                    }, ensure_ascii=False) + "\n")
-
-                    # If this candidate netted a higher score than the start, assume level solved; ladder onward
-                    if cand_blocks and cand_blocks[-1].post_score > 0:
-                        prefix.extend([b.move for b in cand_blocks])
-                        level_solved = True
-                        break
-
-                if not level_solved:
-                    break
-
+            self._run_all_combos()
         finally:
-            try: md.close()
+            try: self._md.close()
             except Exception: pass
-            try: sft.close()
+            try: self._sft.close()
             except Exception: pass
             self.cleanup()
 
-    # -------------------- helpers --------------------
+    # ------------------------ build global Cartesian ------------------------
 
-    @staticmethod
-    def _mv_to_action(m: str) -> GameAction:
-        m = m.strip().lower()
-        if m == "up": return GameAction.ACTION1
-        if m == "down": return GameAction.ACTION2
-        if m == "left": return GameAction.ACTION3
-        if m == "right": return GameAction.ACTION4
-        return GameAction.ACTION5
+    def _iter_global_combos(self) -> List[Tuple[str, List[Tuple[str, int, List[str]]]]]:
+        """
+        Returns list of (combo_key, [(level_name, way_index, moves), ...]) for all global combos.
+        combo_key example: "l1w1_l2w3_l3w2_l4w1"
+        """
+        level_ways = [WAYS_BY_LEVEL[lvl] for lvl in LEVEL_ORDER]
+        index_products = itertools.product(*[range(len(ws)) for ws in level_ways])
+        combos: List[Tuple[str, List[Tuple[str, int, List[str]]]]] = []
+        for idx_tuple in index_products:
+            parts = []
+            spec: List[Tuple[str, int, List[str]]] = []
+            for lvl, w_idx in zip(LEVEL_ORDER, idx_tuple):
+                spec.append((lvl, w_idx + 1, WAYS_BY_LEVEL[lvl][w_idx]))
+                parts.append(f"{lvl}w{w_idx+1}")
+            key = "_".join(parts)
+            combos.append((key, spec))
+        return combos
+
+    # ------------------------ driver (parallel or sequential) ------------------------
+
+    def _run_all_combos(self) -> None:
+        combos = self._iter_global_combos()
+        total = len(combos)
+        headers = {"X-API-Key": os.getenv("ARC_API_KEY", ""), "Accept": "application/json"}
+        cookies = self._session.cookies
+
+        with WRITE_LOCK:
+            self._md.write(f"# AS66 Multi-Turn Conversations — GLOBAL CARTESIAN ({total} episodes)\n")
+            self._md.write(f"Generated: {datetime.utcnow().isoformat()}Z  |  Parallel={PARALLEL}  |  MaxWorkers={MAX_WORKERS}\n\n")
+
+        if PARALLEL and MAX_WORKERS > 1:
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+                futs = [pool.submit(self._run_one_combo, key, spec, headers, cookies) for (key, spec) in combos]
+                for fut in as_completed(futs):
+                    res = fut.result()
+                    self._write_episode(res)
+        else:
+            for key, spec in combos:
+                res = self._run_one_combo(key, spec, headers, cookies)
+                self._write_episode(res)
+
+    # ------------------------ run one episode (one global combo) ------------------------
+
+    def _run_one_combo(
+        self,
+        combo_key: str,
+        combo_spec: List[Tuple[str, int, List[str]]],
+        base_headers: Dict[str, str],
+        base_cookies,
+    ) -> EpisodeResult:
+        """
+        combo_spec: list of (level_name, way_index (1-based), moves)
+        """
+        env = _EnvClient(self.ROOT_URL, self.game_id, self.card_id, base_headers, base_cookies)
+
+        conversation: List[Dict[str, Any]] = []
+        conversation.append({"role": "system", "content": build_primer_system_text()})
+
+        # RESET to start
+        f = env.reset()
+        frames: List[FrameData] = [f]
+
+        # First user message with initial state
+        ds16_pre = downsample_4x4(frames[-1].frame, round_to_int=True) if frames[-1].frame else []
+        conversation.append({"role": "user", "content": build_user_step_text(ds16_pre, frames[-1].score, step=0, note="Initial state")})
+
+        # Episode bookkeeping
+        step_counter = 0
+        last_pre_state = frames[-1].state.name
+        last_ds16_lines = matrix16_to_lines(ds16_pre) if ds16_pre else "(empty)"
+        pre_score = frames[-1].score
+
+        all_blocks: List[Block] = []
+        all_rows: List[StepRow] = []
+
+        # Execute all levels' ways in order
+        for level_name, way_idx, moves in combo_spec:
+            for mv in moves:
+                action_name = self._move_to_action_name(mv)
+
+                # Perform action
+                f = env.act(action_name)
+                frames.append(f)
+                step_counter += 1
+
+                ds16_post = downsample_4x4(f.frame, round_to_int=True)
+                ds16_post_lines = matrix16_to_lines(ds16_post)
+
+                # Row + block
+                row = StepRow(
+                    level=level_name,
+                    combo_id=combo_key,
+                    step_index=step_counter,
+                    move=mv,
+                    pre_state=last_pre_state,
+                    pre_score=pre_score,
+                    post_state=f.state.name,
+                    post_score=f.score,
+                    ds16_pre=last_ds16_lines,
+                    ds16_post=ds16_post_lines,
+                    level_note=None,
+                )
+                if f.score > pre_score:
+                    row.level_note = "LEVEL UP"
+                    pre_score = f.score
+                if f.state is GameState.GAME_OVER:
+                    row.level_note = (row.level_note + " | GAME_OVER") if row.level_note else "GAME_OVER"
+
+                all_rows.append(row)
+
+                blk = Block(
+                    idx=len(all_blocks),
+                    level=level_name,
+                    move=mv,
+                    pre_state=row.pre_state,
+                    pre_score=row.pre_score,
+                    post_state=row.post_state,
+                    post_score=row.post_score,
+                    ds16_pre=row.ds16_pre,
+                    ds16_post=row.ds16_post,
+                    level_note=row.level_note,
+                )
+
+                # Impute observation text (gpt-5 if key present)
+                blk.observation = self._impute_observation_text(
+                    ds16_lines=blk.ds16_pre,
+                    score=blk.pre_score,
+                    step=blk.idx,
+                    full_timeline=all_blocks,
+                )
+                tool_call_id = str(uuid.uuid4())
+                conversation.append({
+                    "role": "assistant",
+                    "content": blk.observation,
+                    "tool_calls": [
+                        {"id": tool_call_id, "type": "function", "function": {"name": action_name, "arguments": {}}}
+                    ],
+                })
+
+                # Tool result
+                tool_content = (
+                    f"RESULT for {action_name}:\n"
+                    f"PostState={blk.post_state} | Score={blk.post_score}\n"
+                    f"Matrix 16x16 (integer codes):\n{blk.ds16_post}\n"
+                )
+                conversation.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "name": action_name,
+                    "content": tool_content,
+                })
+
+                all_blocks.append(blk)
+
+                if f.state is GameState.GAME_OVER:
+                    break
+
+                # Next user message
+                conversation.append({
+                    "role": "user",
+                    "content": build_user_step_text(ds16_post, f.score, step=step_counter, note=blk.level_note),
+                })
+
+            # optional: early stop if game over
+            if frames[-1].state is GameState.GAME_OVER:
+                break
+
+        return EpisodeResult(
+            combo_key=combo_key,
+            conversation=conversation,
+            blocks=all_blocks,
+            rows=all_rows,
+        )
+
+    # ------------------------ write one episode safely ------------------------
+
+    def _write_episode(self, res: EpisodeResult) -> None:
+        with WRITE_LOCK:
+            # Markdown
+            self._md.write(f"## Combo {res.combo_key}\n\n")
+            for blk in res.blocks:
+                self._md.write(f"### Step {blk.idx:02d} [{blk.level}]\n\n")
+                self._md.write(f"**MOVE (target)**: {blk.move}\n\n")
+                self._md.write("**OBSERVATION (imputed)**\n\n")
+                self._md.write((blk.observation or "(missing)") + "\n\n")
+                self._md.write("**STATE AFTER**\n\n")
+                self._md.write(f"GameState={blk.post_state} | Score={blk.post_score}\n\n")
+                self._md.write("```\n" + blk.ds16_post + "\n```\n\n")
+
+            # JSONL (one record per combo)
+            self._sft.write(json.dumps({
+                "id": f"combo-{res.combo_key}",
+                "messages": res.conversation,
+                "tools": TOOL_SCHEMAS,
+                "meta": {"combo": res.combo_key, "levels": LEVEL_ORDER, "moves": len(res.blocks)},
+            }, ensure_ascii=False) + "\n")
+
+            # Rows
+            with open(self._rows_path, "a", encoding="utf-8") as rf:
+                for r in res.rows:
+                    rf.write(json.dumps(r.__dict__, ensure_ascii=False) + "\n")
+
+    # -------------------- helpers --------------------
 
     @staticmethod
     def _move_to_action_name(m: str) -> str:
@@ -334,12 +424,7 @@ class AS66ManualScriptBase(Agent):
         step: int,
         full_timeline: List["Block"],
     ) -> str:
-        """
-        Create an imputed multi-paragraph observation: codes-only, long-form,
-        informed by the whole candidate trajectory but phrased as 'now'.
-        """
         sys_msg = build_primer_system_text()
-        # Build a compact timeline header (without leaking future explicitly)
         snapshot = []
         if full_timeline:
             b = full_timeline[-1]
@@ -359,16 +444,13 @@ class AS66ManualScriptBase(Agent):
 
         key = os.getenv("OPENAI_API_KEY", "").strip()
         if not key:
-            # Fallback stub that still looks like a rich observation
             return (
                 "OBSERVATION:\n"
-                "• The movable cluster is identified against 15 (background) and bounded by 1/14 borders; walls are 4 and block sliding.\n"
-                "• Simulating wrap: Up lands adjacent to 4 at the upper corridor; Down wraps into a 0 cavity candidate; Left stalls; Right aligns with the cavity mouth.\n"
-                "• To progress while avoiding dead wraps, prefer the direction that reduces distance to the 0 gap without repeating prior no-ops.\n"
+                "• Identify the movable cluster against background (15) and boundaries (1/14); walls are 4.\n"
+                "• Simulate wrap/blocks for the four directions; avoid no-op repeats; advance toward target zeros.\n"
                 "ACTION:\n"
             )
         client = OpenAI(api_key=key)
-        # Ask the model for the observation content; the tool call will be added by our code (we supervise the label)
         resp = client.chat.completions.create(
             model="gpt-5",
             messages=[{"role": "system", "content": sys_msg},
@@ -383,4 +465,4 @@ class AS66ManualScriptText(AS66ManualScriptBase):
     USE_IMAGES = False
 
 class AS66ManualScriptVision(AS66ManualScriptBase):
-    USE_IMAGES = True
+    USE_IMAGES = False  # keep off for parallel speed; re-enable if needed
