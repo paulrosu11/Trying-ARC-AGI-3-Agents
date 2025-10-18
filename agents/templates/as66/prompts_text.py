@@ -253,7 +253,8 @@ _GENERAL_OBS_SYSTEM = (
     "3) Change-tracking plan (how you will detect/measure differences after an action: moved cells, count deltas, etc.).\n"
     "4) One-sentence recommended next action (prose only) chosen to maximally reduce uncertainty about the rules."
         "**THE MOST IMPORTANT THING TO KEEP IN MIND IS THE RESULTS OF YOUR PAST ACTIONS AND PREVIOUSLY WHAT STATE CHANGE CAME FROM THEM, DO NOT REPREAT ACTIONS THAT CHANGED NOTHING!"
-        "I repeat, do not reselect an action from the past if the state is the same. **try something new like clicking, or space, or moving in a different direction**"
+        "I repeat, do not reselect an action from the past if the state is the same. **try something new like clicking, or action 5, or moving in a different direction from before**"
+        "Please start with stating what changed from last time, explicitly noting if the state is identical, and recalling what moves caused changes and in what way in the past"
 )
 
 _GENERAL_OBS_USER_TMPL = (
