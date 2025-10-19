@@ -42,7 +42,7 @@ def evaluate_single_game(
     actions_this_level = 0
     max_score = 0
     
-    # --- CORRECTED LOOP LOGIC ---
+  
     # The evaluation loop must manage its own action counter.
     actions_taken_so_far = 0
 
@@ -102,7 +102,7 @@ def evaluate_single_game(
         else: 
             metrics.status = "TIMEOUT"
             log.warning(f"Game '{game_id}' timed out after {actions_taken_so_far} actions.")
-    # --- END CORRECTION ---
+
 
     except Exception as e:
         metrics.status = "ERROR"

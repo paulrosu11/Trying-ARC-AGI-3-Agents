@@ -7,8 +7,8 @@ from .metrics import OverallMetrics
 
 def generate_report(metrics: OverallMetrics, suite_name: str):
     ...
-    # --- Per-Game Details Table ---
-    print("🕹️ Per-Game Details")
+    
+    print("Per-Game Details")
     print("-----------------------------------------------------------------------------------------------------")
     # Updated header
     print(f"{'Game ID':<25} | {'Status':<12} | {'Score':>5} | {'Actions (per Level)':>25} | {'State Changes (%)':>20} | {'Game Overs':>10}")
