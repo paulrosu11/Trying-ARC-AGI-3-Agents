@@ -72,7 +72,7 @@ def evaluate_single_game(
             max_score = max(max_score, latest_frame.score)
             actions_this_level += 1
 
-            if latest_frame.model_dump() != previous_frame.model_dump():
+            if latest_frame.frame != previous_frame.frame:
                 metrics.state_changes += 1
 
             if latest_frame.score > previous_frame.score:
