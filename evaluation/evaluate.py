@@ -61,6 +61,7 @@ def evaluate_single_game(
             
             previous_frame = agent.frames[-1]
             latest_frame = agent.take_action(action)
+            agent.action_counter += 1
 
             if not latest_frame:
                 log.error(f"[{game_id}] Agent failed to get a valid frame. Stopping.")
@@ -76,7 +77,7 @@ def evaluate_single_game(
                 metrics.state_changes += 1
 
             if latest_frame.score > previous_frame.score:
-                log.info(f"Level {current_level} completed in {actions_this_level} actions for game {game_id}.")
+                log.info(f"Level {current_level} completed in {actions_this_level} actions for game {game_id}. Currently at {latest_frame.score} with current total actions {actions_taken_so_far} out of {max_actions_per_game}")
                 metrics.actions_per_level[current_level] = actions_this_level
                 current_level += 1
                 actions_this_level = 0
