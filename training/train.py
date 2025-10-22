@@ -162,33 +162,6 @@ def load_model(args: argparse.Namespace) -> torch.nn.Module:
     return model
 
 
-def _format_messages(tokenizer: Any, messages: List[Dict[str, str]]) -> str:
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-
-
-def _format_example(
-    example: Dict[str, Any],
-    tokenizer: Any,
-    args: argparse.Namespace,
-) -> Dict[str, Any]:
-    if args.use_chat_template and "messages" in example:
-        text = _format_messages(tokenizer, example["messages"])
-    elif "text" in example:
-        text = example["text"]
-    elif args.text_field in example:
-        text = example[args.text_field]
-    else:
-        raise ValueError("Example missing both 'messages' and text field")
-
-    tokenized = tokenizer(
-        text,
-        max_length=args.max_length,
-        truncation=True,
-        padding="max_length" if args.pad_to_max_length else False,
-        return_attention_mask=True,
-    )
-    tokenized["labels"] = tokenized["input_ids"].copy()
-    return tokenized
 
 
 def prepare_datasets(
@@ -243,6 +216,31 @@ def _batch_format_examples(
         outputs["labels"].append(formatted["labels"])
     return outputs
 
+def _format_example(
+    example: Dict[str, Any],
+    tokenizer: Any,
+    args: argparse.Namespace,
+) -> Dict[str, Any]:
+    if args.use_chat_template and "messages" in example:
+        print(f"before: {messages}")
+        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        print(f"after: {text}")
+    elif "text" in example:
+        text = example["text"]
+    elif args.text_field in example:
+        text = example[args.text_field]
+    else:
+        raise ValueError("Example missing both 'messages' and text field")
+
+    tokenized = tokenizer(
+        text,
+        max_length=args.max_length,
+        truncation=True,
+        padding="max_length" if args.pad_to_max_length else False,
+        return_attention_mask=True,
+    )
+    tokenized["labels"] = tokenized["input_ids"].copy()
+    return tokenized
 
 def build_training_arguments(args: argparse.Namespace) -> TrainingArguments:
     deepspeed_path = args.deepspeed_config

@@ -1,6 +1,6 @@
 model_name_or_path: Qwen/Qwen3-4B-Instruct-2507
 train_file: ../data/train-2.jsonl
-output_dir: ../outputs
+output_dir: /data/junlin/ARC/saved/SFT/
 
 # Optional evaluation file. Provide a path or leave commented.
 # eval_file: ../eval.jsonl
@@ -21,7 +21,6 @@ weight_decay: 0.0
 warmup_ratio: 0.0
 max_grad_norm: 1.0
 
-deepspeed_config: ../deepspeed/zero1.json
 bf16: true
 fp16: false
 gradient_checkpointing: true

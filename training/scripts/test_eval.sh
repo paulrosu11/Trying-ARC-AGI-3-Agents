@@ -6,6 +6,7 @@ source /home/jwang/Arc/.venv/bin/activate
 export WANDB_API_KEY=$WANDB_API_KEY
 export WANDB_PROJECT="arc-agents"
 export ARC_API_KEY=$ARC_API_KEY
+# export RECORDINGS_DIR=
 
 # AVAILABLE_AGENTS.update({
 #     "as66manualscripttext": AS66ManualScriptText,
