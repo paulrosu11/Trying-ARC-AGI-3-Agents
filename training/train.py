@@ -44,7 +44,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "eval_steps": 1000,
     "evaluation_strategy": "steps",
     "report_to": "wandb",
-    "deepspeed_config": None,
     "bf16": False,
     "fp16": False,
     "gradient_checkpointing": False,
@@ -85,7 +84,7 @@ def load_config_file(path: Path) -> Dict[str, Any]:
 def normalize_config(config: Dict[str, Any], base_dir: Path) -> Dict[str, Any]:
     normalized = dict(config)
 
-    for path_key in ["train_file", "eval_file", "deepspeed_config", "output_dir", "resume_from_checkpoint"]:
+    for path_key in ["train_file", "eval_file", "output_dir", "resume_from_checkpoint"]:
         value = normalized.get(path_key)
         if _is_missing(value):
             normalized[path_key] = None
@@ -141,7 +140,7 @@ def load_tokenizer(model_name_or_path: str, trust_remote_code: bool) -> Any:
 def load_model(args: argparse.Namespace) -> torch.nn.Module:
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name_or_path,
-        torch_dtype=torch.bfloat16 if args.bf16 else torch.float16 if args.fp16 else torch.float32,
+        dtype=torch.bfloat16 if args.bf16 else torch.float16 if args.fp16 else torch.float32,
         trust_remote_code=args.trust_remote_code,
     )
 
@@ -222,9 +221,7 @@ def _format_example(
     args: argparse.Namespace,
 ) -> Dict[str, Any]:
     if args.use_chat_template and "messages" in example:
-        print(f"before: {messages}")
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
-        print(f"after: {text}")
+        text = tokenizer.apply_chat_template(example['messages'], tokenize=False, add_generation_prompt=False)
     elif "text" in example:
         text = example["text"]
     elif args.text_field in example:
@@ -239,13 +236,12 @@ def _format_example(
         padding="max_length" if args.pad_to_max_length else False,
         return_attention_mask=True,
     )
+    print(f"----after:\n{text}")
+    print(f"----tokenized:\n{tokenized}, length: {len(tokenized['input_ids'])}")
     tokenized["labels"] = tokenized["input_ids"].copy()
     return tokenized
 
 def build_training_arguments(args: argparse.Namespace) -> TrainingArguments:
-    deepspeed_path = args.deepspeed_config
-    if deepspeed_path is not None and not Path(deepspeed_path).is_file():
-        raise FileNotFoundError(f"DeepSpeed config not found: {deepspeed_path}")
 
     return TrainingArguments(
         output_dir=args.output_dir,
@@ -269,7 +265,6 @@ def build_training_arguments(args: argparse.Namespace) -> TrainingArguments:
         remove_unused_columns=False,
         bf16=args.bf16,
         fp16=args.fp16,
-        deepspeed=deepspeed_path,
     )
 
 
