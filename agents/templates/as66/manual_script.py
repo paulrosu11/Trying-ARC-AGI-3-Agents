@@ -53,25 +53,32 @@ from .prompts_sft import build_primer_system_text, build_user_step_text
 WAYS_BY_LEVEL: dict[str, List[List[str]]] = {
     "l1": [
         ["Down", "Left", "Down"],
-        # Add a second way here if you have it, e.g.:
-        # ["Up","Right","Down"]
+
     ],
     "l2": [
         ["Right","Down","Left"],                                        # l2a
-        ["Down","Left","Up","Right","Down","Left"],                    # l2b
-        ["Up","Down","Left","Down","Right","Up","Right"],              # l2c
-        ["Right","Up","Right","Down","Left"],                          # l2d
-        ["Down","Left","Up","Right","Up","Down","Left"],               # l2e
+       ["Down","Left","Up","Right","Down","Left"],                    # l2b
+        ["Right","Up","Down","Left"],
+        ["Down","Left","Up","Right","Down","Left"],
+        ["Up","Down","Left","Up","Right","Up","Down","Left"],
     ],
     "l3": [
         ["Right","Down","Right","Down","Left","Right","Left","Up"],    # l3a
-        ["Down","Left","Up","Right","Left","Right","Left","Right","Up"],# l3b
-        ["Right","Down","Right","Down","Right","Left","Up"],           # l3c
+        ["Down","Left","Up","Right","Left","Right","Up"],
+        ["Right","Down","Right","Down","Left","Right","Left","Up"],
+        ["Down","Right","Left","Down","Up","Right","Down","Up"],
+        ["Right","Down","Right","Up","Left","Up","Left","Up","Right","Down","Right","Down","Right","Left","Right","Left","Up"],
+
+
     ],
     "l4": [
-        ["Left","Up","Down","Up","Left","Up"],                         # l4a
-        ["Left","Up","Left","Up"],                                     # l4b
-        ["Up","Left","Down","Left","Up"],                              # l4c
+        ["Up","Left","Down","Left","Up"],              
+        ["Up","Left","Down","Left","Up"],
+        ["Right","Up","Left","Up"],
+        ["Up","Right","Left","Down","Left","Up"],
+
+
+ 
     ],
 }
 
