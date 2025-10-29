@@ -1,0 +1,162 @@
+--- Evaluation Summary Report ---
+Agent: as66memoryagent
+Suite: standard_suite
+Requested Runs per Game: 3
+Generated At: 2025-10-29T01:25:23.569354
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 18
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 94.59s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 90.67s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          3.0 |        90.67s |          1.3 |       0.0 |        0.0% |          3
+
+================================================================================
+Game ID: ft09-b8377d4b7815
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 88.46s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          3.0 |        88.46s |          0.0 |       0.0 |        0.0% |          3
+
+================================================================================
+Game ID: lp85-d265526edbaa
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 103.99s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          3.0 |       103.99s |          0.0 |       0.0 |        0.0% |          3
+
+================================================================================
+Game ID: ls20-fa137e247ce6
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 85.94s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          3.0 |        85.94s |          1.3 |       0.0 |        0.0% |          3
+
+================================================================================
+Game ID: sp80-0605ab9e5b2a
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 107.87s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          3.0 |       107.87s |          2.7 |       0.0 |        0.0% |          3
+
+================================================================================
+Game ID: vc33-6ae7bf49eea5
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 90.57s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          3.0 |        90.57s |          0.0 |       0.0 |        0.0% |          3
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  96.76s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/514ce965-f8ab-4e89-a164-6ed5efee7f02
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  92.87s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/067ea9e9-7117-4e75-afea-1eabb49086e9
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  82.40s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/69bedb9c-844c-4bb3-85ef-6fd41ce067a9
+
+Game: ft09-b8377d4b7815
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  97.23s -> https://three.arcprize.org/replay/ft09-b8377d4b7815/49bbd7df-7da4-4f9d-aaae-40917ca533cf
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  86.16s -> https://three.arcprize.org/replay/ft09-b8377d4b7815/5953e478-5bdb-4629-9c5c-46fdc441b89f
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  82.01s -> https://three.arcprize.org/replay/ft09-b8377d4b7815/46ab9700-92b3-4346-bcf6-f71dda5cb20d
+
+Game: lp85-d265526edbaa
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur= 101.47s -> https://three.arcprize.org/replay/lp85-d265526edbaa/f16484bc-28ad-4db3-901d-0df019577e98
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur= 107.63s -> https://three.arcprize.org/replay/lp85-d265526edbaa/ae6ba05d-384e-4ec9-b934-438889c64f14
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur= 102.86s -> https://three.arcprize.org/replay/lp85-d265526edbaa/9048f8b6-313a-40b1-8245-0f5008f45ccd
+
+Game: ls20-fa137e247ce6
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  88.28s -> https://three.arcprize.org/replay/ls20-fa137e247ce6/cd6d9bb4-47e7-4a9f-b8fe-43d6529bc58f
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  88.17s -> https://three.arcprize.org/replay/ls20-fa137e247ce6/757a25cc-9055-43dc-9a03-a010df9eed47
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  81.37s -> https://three.arcprize.org/replay/ls20-fa137e247ce6/1132a638-811f-45ed-8a75-9f2a8b00b312
+
+Game: sp80-0605ab9e5b2a
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur= 101.28s -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/ca51151e-d15e-4367-ab65-8eb0a435d28c
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur= 114.73s -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/880ae492-fe43-4a71-956c-6d016ac5cd6e
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur= 107.61s -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/4763e7df-8ae6-44b5-9285-31e39090aa4d
+
+Game: vc33-6ae7bf49eea5
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  90.54s -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/ba1a58b4-11dc-4c67-848f-21153ec7fb37
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  86.37s -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/14020683-1bd6-4fc1-9fc7-0278f255e348
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   3, Dur=  94.82s -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/770a8c0a-5592-4229-b99b-f9bba089992b
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---

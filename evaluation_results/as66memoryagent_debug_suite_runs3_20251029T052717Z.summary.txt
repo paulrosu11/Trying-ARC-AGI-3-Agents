@@ -1,0 +1,47 @@
+--- Evaluation Summary Report ---
+Agent: as66memoryagent
+Suite: debug_suite
+Requested Runs per Game: 3
+Generated At: 2025-10-29T01:33:22.294585
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 3
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 323.95s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 3
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 15.0
+    Avg Run Duration: 323.95s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |         15.0 |       323.95s |          3.7 |       0.0 |        0.0% |          3
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=  15, Dur= 363.39s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/94cf0afd-36e0-4b8e-bbb2-543e5c581035
+  Run  2: TIMEOUT         Score=   0, HighestLvl= 1, Actions=  15, Dur= 301.11s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/79314d37-07aa-49a9-b854-c1344cf8c1aa
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions=  15, Dur= 307.36s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/ec70b06a-ce6b-4d1f-b868-56765dd4e42e
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---

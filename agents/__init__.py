@@ -20,7 +20,8 @@ from .templates.as66 import (
     AS66VisualGuidedAgent,
     AS66ManualScriptText,
     AS66ManualScriptVision,
-    AS66GuidedAgent64
+    AS66GuidedAgent64,
+    AS66MemoryAgent,
 )
 
 load_dotenv()
@@ -33,7 +34,7 @@ AVAILABLE_AGENTS: dict[str, Type[Agent]] = {
 
 # add all the recording files as valid agent names
 #for rec in Recorder.list():
- #   AVAILABLE_AGENTS[rec] = Playback
+#    AVAILABLE_AGENTS[rec] = Playback
 
 # update the agent dictionary to include subclasses of LLM class
 AVAILABLE_AGENTS["reasoningagent"] = ReasoningAgent
@@ -60,6 +61,8 @@ AVAILABLE_AGENTS.update({
     "as66visualguidedagent": AS66VisualGuidedAgent,
     "as66-guided": AS66GuidedAgent,
     "as66guidedagent64": AS66GuidedAgent64,
+    "as66memoryagent": AS66MemoryAgent,
+    "as66-memory": AS66MemoryAgent,
 })
 
 __all__ = [

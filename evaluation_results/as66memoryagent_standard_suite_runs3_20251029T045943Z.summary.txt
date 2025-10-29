@@ -1,0 +1,64 @@
+--- Evaluation Summary Report ---
+Agent: as66memoryagent
+Suite: standard_suite
+Requested Runs per Game: 3
+Generated At: 2025-10-29T01:03:59.893643
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 18
+Total Runs Completed: 0
+Overall Completion Rate: 0.0%
+Average Duration (all runs): 113.18s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged)
+----------------------------------------------------------------------------------------------------------------------
+Game ID                   |  Avg Score (Cmpl) |  Avg Acts (All) |   Avg Dur (s) |   Cmpl Rate |  Runs (D/T) |   Avg GO
+----------------------------------------------------------------------------------------------------------------------
+as66-821a4dcad9c2         |               0.0 |             3.0 |       119.83s |        0.0% |         0/3 |      0.0
+ft09-b8377d4b7815         |               0.0 |             3.0 |       109.84s |        0.0% |         0/3 |      0.0
+lp85-d265526edbaa         |               0.0 |             3.0 |       108.08s |        0.0% |         0/3 |      0.0
+ls20-fa137e247ce6         |               0.0 |             3.0 |       106.34s |        0.0% |         0/3 |      0.0
+sp80-0605ab9e5b2a         |               0.0 |             3.0 |       110.30s |        0.0% |         0/3 |      0.0
+vc33-6ae7bf49eea5         |               0.0 |             3.0 |       124.69s |        0.0% |         0/3 |      0.0
+----------------------------------------------------------------------------------------------------------------------
+
+## Replay Links
+--------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run 1: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/eda74e81-309e-47d4-81d6-0e4735e32100
+  Run 2: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/e86a82e5-64bb-4aba-b769-1f6bba6b7420
+  Run 3: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/c4263b45-c891-4a1f-89f1-3af657c07eff
+
+Game: ft09-b8377d4b7815
+  Run 1: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/7a32ca14-6434-48b5-8dd5-53294262ab9d
+  Run 2: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/6ea828c5-fc5d-42ad-8e9d-b3772dcc8be8
+  Run 3: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/0ecc85db-ac46-4ae0-806b-fffeb634d19e
+
+Game: lp85-d265526edbaa
+  Run 1: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/d6f406d4-b6af-4589-93dd-7949a1a45b5a
+  Run 2: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/e36922f0-29fd-48d1-b1cd-f97598e88da5
+  Run 3: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/3f06198b-cc33-48e6-a223-025e123f8c56
+
+Game: ls20-fa137e247ce6
+  Run 1: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/d8d017b3-ec70-42e4-aa2a-431f560174d0
+  Run 2: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/35796713-2f6f-46e5-afcc-4265b392d111
+  Run 3: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/5b37ed60-c31d-4b84-b821-2c4b5068b78f
+
+Game: sp80-0605ab9e5b2a
+  Run 1: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/95f1b320-24c6-4510-a459-ce8ef59d4ad4
+  Run 2: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/ef34d2e9-e227-4301-881f-b50685be27fe
+  Run 3: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/4ab4d71a-4a23-4593-b82d-b1349f3d109e
+
+Game: vc33-6ae7bf49eea5
+  Run 1: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/b93c59d1-f087-4ec5-834a-053e6efc1589
+  Run 2: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/e47bda6b-1e75-458d-8db0-20ea021e985a
+  Run 3: TIMEOUT - https://three.arcprize.org/scorecards/7a03fac4-9cb9-4b5b-a6a1-86416e642524/replays/2f04a24b-43e4-4f1f-a482-3142f999e0ce
+--------------------------------------------------
+
+--- End of Summary Report ---
+
+https://three.arcprize.org/replay/as66-821a4dcad9c2/c4263b45-c891-4a1f-89f1-3af657c07eff

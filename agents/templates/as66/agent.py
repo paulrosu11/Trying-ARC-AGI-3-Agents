@@ -94,10 +94,10 @@ class AS66GuidedAgent(GuidedLLM):
     """
 
     MAX_ACTIONS = 3000
-    MODEL = "gpt-5-nano"
+    MODEL = "gpt-5"
     DO_OBSERVATION = True
     MODEL_REQUIRES_TOOLS = True
-    MESSAGE_LIMIT = 20
+    MESSAGE_LIMIT = 1000
     REASONING_EFFORT = "low"
 
     _transcript: str = ""
