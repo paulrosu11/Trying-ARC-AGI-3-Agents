@@ -1,0 +1,45 @@
+--- Evaluation Summary Report ---
+Agent: as66-image-only
+Suite: debug_suite
+Requested Runs per Game: 1
+Generated At: 2025-10-29T23:45:49.568885
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 1
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 325.59s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 1
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 2.0
+    Avg Run Duration: 325.59s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |          2.0 |       325.59s |          1.0 |       0.0 |        0.0% |          1
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: TIMEOUT         Score=   0, HighestLvl= 1, Actions=   2, Dur= 325.59s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/8fbeeae3-45ad-495e-bb41-ee7d8f563f18
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---

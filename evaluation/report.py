@@ -142,7 +142,7 @@ def generate_console_report(results_data: List[Dict[str, Any]], suite_name: str,
     print("-----------------------------------")
 
     # Overall Summary
-    print("\n## 📈 Overall Summary")
+    print("\n##  Overall Summary")
     print("--------------------------------------------------")
     # ... (overall summary print - same as before) ...
     print(f"Total Runs Attempted: {overall_summary['total_runs']}")
@@ -153,7 +153,7 @@ def generate_console_report(results_data: List[Dict[str, Any]], suite_name: str,
 
 
     # Per-Game Summary (Averaged) - Now includes highest level
-    print("\n## 🎮 Per-Game Summary (Averaged)")
+    print("\n## Per-Game Summary (Averaged)")
     print("-" * 140) # Adjusted width
     header = f"{'Game ID':<25} | {'Avg Final Score':>16} | {'Avg Highest Lvl':>16} | {'Avg Actions (Run)':>18} | {'Avg Duration (Run)':>18} | {'Run Cmpl Rate':>15} | {'Runs (Done/Total)':>18}"
     print(header)
@@ -188,7 +188,7 @@ def generate_console_report(results_data: List[Dict[str, Any]], suite_name: str,
 
 
     # Detailed Per-Run Results (Console) - Includes replay URL
-    print("\n## 📊 Detailed Per-Run Results")
+    print("\n##  Detailed Per-Run Results")
     print("-" * 150) 
     # Added Highest Lvl column
     detail_header = f"{'Game ID':<25} | {'Run':>5} | {'Status':<15} | {'Score':>7} | {'Highest Lvl':>12} | {'Actions':>9} | {'Duration (s)':>14} | {'Game Overs':>12} | {'Replay URL'}" 

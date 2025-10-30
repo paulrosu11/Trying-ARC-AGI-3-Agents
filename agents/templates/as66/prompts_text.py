@@ -27,7 +27,7 @@ Multi-game prompt selector with a runtime switch:
 # -------------------------
 # Switch: set in code (default), or override via env var
 # -------------------------
-USE_GENERAL_PROMPTS_DEFAULT: bool = False  # ← flip to True in code to force GENERAL prompts
+USE_GENERAL_PROMPTS_DEFAULT: bool = False # ← flip to True in code to force GENERAL prompts
 
 def _use_general(use_general: Optional[bool]) -> bool:
     if use_general is not None:
@@ -81,13 +81,13 @@ _AS66_OBS_SYSTEM = (
 _AS66_OBS_USER_TMPL = (
     "Score: {score}\n"
     "Step: {step}\n"
-    "Matrix 16x16 (integer codes):\n"
-    "{matrix}\n\n"
+    "{matrix_block}" # This will be either the matrix string or empty
     "Rationale:\n"
     "  • Identify the movable integer(s) and relevant structures (0/4/15/1/14 and any 8/9 enemy mass).\n"
     "  • For Up, Down, Left, Right: fully simulate wrap-around sliding, state blockers, and final landing positions.\n"
     "  • Explain how each landing affects progress toward completing the 2×3 U cavity (0 region) and whether the enemy’s response threatens collision.\n"
-    "  • Conclude which direction is best and why. Do not output an action here."
+    "  • Conclude which direction is best and why. Do not output an action here.\n"
+    "{format_clarification}" # NEW: Add clarification here
 )
 
 # Keep the original ACTION set for AS66 "detailed" to match your current wording
@@ -102,10 +102,10 @@ _AS66_ACT_SYSTEM = (
 
 _AS66_ACT_USER_TMPL = (
     "Choose the best single move as a function call.\n"
-    "Matrix 16x16 (integer codes):\n"
-    "{matrix}\n\n"
+    "{matrix_block}" # This will be either the matrix string or empty
     "Previous observation summary:\n"
     "{last_obs}\n"
+    "{format_clarification}" # NEW: Add clarification here
 )
 
 # Filler stubs for the other five games (you can paste real rules later)
@@ -147,12 +147,12 @@ _SP80_OBS_SYSTEM = (
 GENERIC_STUB_OBS_USER_TMPL = (
     "Score: {score}\n"
     "Step: {step}\n"
-    "Matrix 16x16 (integer codes):\n"
-    "{matrix}\n\n"
+    "{matrix_block}\n"
     "Rationale (tailored to this game):\n"
     "  • Identify controllable piece(s) and key structures.\n"
     "  • For Up/Down/Left/Right: describe blockers and final landings.\n"
-    "  • Choose the best direction (no tool call here)."
+    "  • Choose the best direction (no tool call here).\n"
+    "{format_clarification}"
 )
 
 # For stubs, we expose the full action set (incl. click/space) since your code supports it.
@@ -170,10 +170,10 @@ STUB_ACT_SYSTEM = (
 
 STUB_ACT_USER_TMPL = (
     "Choose exactly one action.\n"
-    "Matrix 16x16 (integer codes):\n"
-    "{matrix}\n\n"
+    "{matrix_block}\n"
     "Previous observation summary:\n"
     "{last_obs}\n"
+    "{format_clarification}"
 )
 
 DETAILED_PACKS: Dict[str, Dict[str, str]] = {
@@ -252,44 +252,44 @@ _GENERAL_OBS_SYSTEM = (
     "2) Hypotheses (concise, testable; include invariants and expected effects of inputs without asserting certainty).\n"
     "3) Change-tracking plan (how you will detect/measure differences after an action: moved cells, count deltas, etc.).\n"
     "4) One-sentence recommended next action (prose only) chosen to maximally reduce uncertainty about the rules."
-        "**THE MOST IMPORTANT THING TO KEEP IN MIND IS THE RESULTS OF YOUR PAST ACTIONS AND PREVIOUSLY WHAT STATE CHANGE CAME FROM THEM, DO NOT REPREAT ACTIONS THAT CHANGED NOTHING!"
-        "I repeat, do not reselect an action from the past if the state is the same. **try something new like clicking, or action 5, or moving in a different direction from before**"
-        "Please start with stating what changed from last time, explicitly noting if the state is identical, and recalling what moves caused changes and in what way in the past"
+    "    **THE MOST IMPORTANT THING TO KEEP IN MIND IS THE RESULTS OF YOUR PAST ACTIONS AND PREVIOUSLY WHAT STATE CHANGE CAME FROM THEM, DO NOT REPREAT ACTIONS THAT CHANGED NOTHING!"
+    "    I repeat, do not reselect an action from the past if the state is the same. **try something new like clicking, or action 5, or moving in a different direction from before**"
+    "    Please start with stating what changed from last time, explicitly noting if the state is identical, and recalling what moves caused changes and in what way in the past"
 )
 
 _GENERAL_OBS_USER_TMPL = (
     "Score: {score}\n"
     "Step: {step}\n"
-    "Matrix 16x16 (integer codes):\n"
-    "{matrix}\n\n"
+    "{matrix_block}\n"
     "In your OBSERVATION (no tool call):\n"
     "  • Note controllable pieces and important structures.\n"
     "  • Hypothesize rules (slide/step, wrap/stop, merges, keys/locks, hazards, counters).\n"
     "  • For Up/Down/Left/Right (and possibly click/space), describe expected outcomes and blockers.\n"
-    "  • Conclude the best action type now (one sentence; prose only)."
+    "  • Conclude the best action type now (one sentence; prose only).\n"
+    "{format_clarification}"
 )
 
 _GENERAL_ACT_SYSTEM = (
     "ACTION PHASE — Call exactly ONE tool; no prose.\n"
     "Available tools:\n"
-    "• RESET                      (restart when NOT_PLAYED or after GAME_OVER)\n"
-    "• ACTION1 = Up               (directional move)\n"
-    "• ACTION2 = Down             (directional move)\n"
-    "• ACTION3 = Left             (directional move)\n"
-    "• ACTION4 = Right            (directional move)\n"
+    "• RESET                  (restart when NOT_PLAYED or after GAME_OVER)\n"
+    "• ACTION1 = Up           (directional move)\n"
+    "• ACTION2 = Down         (directional move)\n"
+    "• ACTION3 = Left         (directional move)\n"
+    "• ACTION4 = Right        (directional move)\n"
     "• ACTION5 = Space/Enter/No-op (some games bind a key; otherwise may do nothing)\n"
-    "• ACTION6 = Click(x,y)       (click at a coordinate)\n\n"
+    "• ACTION6 = Click(x,y)     (click at a coordinate)\n\n"
     "CLICK COORDS (ACTION6):\n"
     "  - Provide x,y as 16×16 cell indices (0..15) to click that int. "
 )
 
 _GENERAL_ACT_USER_TMPL = (
     "Choose and call exactly ONE tool.\n"
-    "Matrix 16x16 (integer codes):\n"
-    "{matrix}\n\n"
+    "{matrix_block}\n"
     "Previous observation summary:\n"
     "{last_obs}\n"
-    "If clicking (ACTION6), supply integers x,y (cell indices 0..15). No prose."
+    "If clicking (ACTION6), supply integers x,y (cell indices 0..15). No prose.\n"
+    "{format_clarification}"
 )
 
 GENERAL_PACK = {
@@ -332,13 +332,26 @@ def build_observation_user_text(
     step: int,
     game_id: Optional[str] = None,
     use_general: Optional[bool] = None,
+    # NEW KWARGS
+    format_clarification: str = "",
+    include_text_matrix: bool = True,
 ) -> str:
-    # You can swap this for inline rendering if you prefer:
-    # rows = [" ".join(str(v) for v in r) for r in ds16]
-    # matrix = "\n".join(rows)
-    matrix = matrix16_to_lines(ds16)
+    if include_text_matrix:
+        matrix = matrix16_to_lines(ds16)
+        matrix_block = (
+            "Matrix 16x16 (integer codes):\n"
+            f"{matrix}\n"
+        )
+    else:
+        matrix_block = "" # Omit the matrix block entirely
+    
     tmpl = _select_pack(game_id, use_general)["obs_user_tmpl"]
-    return tmpl.format(matrix=matrix, score=score, step=step).strip()
+    return tmpl.format(
+        matrix_block=matrix_block,
+        score=score,
+        step=step,
+        format_clarification=format_clarification.strip()
+    ).strip()
 
 def build_action_system_text(
     game_id: Optional[str] = None,
@@ -351,7 +364,22 @@ def build_action_user_text(
     last_observation_text: str,
     game_id: Optional[str] = None,
     use_general: Optional[bool] = None,
+    # NEW KWARGS
+    format_clarification: str = "",
+    include_text_matrix: bool = True,
 ) -> str:
-    matrix = matrix16_to_lines(ds16)
+    if include_text_matrix:
+        matrix = matrix16_to_lines(ds16)
+        matrix_block = (
+            "Matrix 16x16 (integer codes):\n"
+            f"{matrix}\n"
+        )
+    else:
+        matrix_block = "" # Omit the matrix block entirely
+    
     tmpl = _select_pack(game_id, use_general)["act_user_tmpl"]
-    return tmpl.format(matrix=matrix, last_obs=last_observation_text).strip()
+    return tmpl.format(
+        matrix_block=matrix_block,
+        last_obs=last_observation_text,
+        format_clarification=format_clarification.strip()
+    ).strip()

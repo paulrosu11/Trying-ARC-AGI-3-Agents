@@ -98,7 +98,7 @@ def evaluate_single_game(
 
             # --- Update Level Metrics ---
             if latest_frame.frame != previous_frame.frame:
-                 current_level_metrics.state_changes += 1
+                current_level_metrics.state_changes += 1
 
             # --- Handle Level Completion ---
             level_completed = (latest_frame.score > previous_frame.score and 
@@ -177,7 +177,7 @@ def evaluate_single_game(
         if current_level_number not in run_metrics.level_metrics:
             # Ensure duration is calculated if not already set
             if current_level_metrics.duration_seconds == 0.0:
-                 current_level_metrics.duration_seconds = run_metrics.end_time - level_start_time
+                current_level_metrics.duration_seconds = run_metrics.end_time - level_start_time
             run_metrics.level_metrics[current_level_number] = current_level_metrics
 
         # Aggregate totals from level metrics
@@ -196,6 +196,11 @@ def evaluate_single_game(
         else:
             log.warning(f"[{game_id} Run {run_index}] Could not capture GUID for replay link.")
             run_metrics.replay_url = None
+        
+    
+        # Call cleanup on the agent to ensure transcripts are flushed and closed
+        agent.cleanup()
+ 
 
     return run_metrics
 
@@ -280,13 +285,13 @@ def main():
             r = s.post(f"{ROOT_URL}/api/scorecard/open", json={"tags": tags}, timeout=30)
             log.info(f"Scorecard open response status: {r.status_code}") 
             if r.status_code == 401:
-                 log.error(f"Authentication failed (401 Unauthorized). Check if ARC_API_KEY is correct and valid: {api_key[:4]}...{api_key[-4:]}")
-                 sys.exit(1) 
+                log.error(f"Authentication failed (401 Unauthorized). Check if ARC_API_KEY is correct and valid: {api_key[:4]}...{api_key[-4:]}")
+                sys.exit(1) 
             r.raise_for_status() 
             response_data = r.json()
             card_id = response_data.get("card_id")
             if not card_id:
-                 raise ValueError("API did not return a card_id when opening scorecard.")
+                raise ValueError("API did not return a card_id when opening scorecard.")
             cookies = s.cookies 
             log.info(f"Scorecard '{card_id}' opened for evaluation run.")
 
@@ -329,7 +334,7 @@ def main():
                             metrics_dict_serializable['start_time_iso'] = datetime.fromtimestamp(metrics_dict['start_time'], timezone.utc).isoformat()
                             metrics_dict_serializable['end_time_iso'] = datetime.fromtimestamp(metrics_dict['end_time'], timezone.utc).isoformat()
                             f.write(json.dumps(metrics_dict_serializable) + "\n")
-                    
+                        
                     completed_tasks += 1
                     log.info(f"Progress: {completed_tasks}/{total_tasks} tasks completed.")
 
@@ -346,10 +351,10 @@ def main():
 
                     with file_lock:
                         with open(results_filepath_jsonl, "a", encoding="utf-8") as f:
-                           err_dict['start_time_iso'] = datetime.fromtimestamp(err_dict['start_time'], timezone.utc).isoformat()
-                           err_dict['end_time_iso'] = datetime.fromtimestamp(err_dict['end_time'], timezone.utc).isoformat()
-                           f.write(json.dumps(err_dict) + "\n")
-                           
+                            err_dict['start_time_iso'] = datetime.fromtimestamp(err_dict['start_time'], timezone.utc).isoformat()
+                            err_dict['end_time_iso'] = datetime.fromtimestamp(err_dict['end_time'], timezone.utc).isoformat()
+                            f.write(json.dumps(err_dict) + "\n")
+                            
                     completed_tasks += 1 
                     log.info(f"Progress: {completed_tasks}/{total_tasks} tasks completed (including errors).")
 
@@ -358,7 +363,7 @@ def main():
     except requests.exceptions.HTTPError as http_err:
         log.error(f"HTTP error during evaluation setup: {http_err}") 
     except Exception as e:
-         log.error(f"Unexpected error in main loop: {e}", exc_info=True)
+        log.error(f"Unexpected error in main loop: {e}", exc_info=True)
     finally:
         # Close Scorecard
         if card_id:
@@ -367,19 +372,19 @@ def main():
                 with requests.Session() as s_close:
                     s_close.headers.update(headers) 
                     if cookies:
-                         s_close.cookies.update(cookies)
+                        s_close.cookies.update(cookies)
                     close_response = s_close.post(f"{ROOT_URL}/api/scorecard/close", json={"card_id": card_id}, timeout=30)
                     if close_response.status_code != 200:
-                         log.warning(f"Failed to close scorecard '{card_id}'. Status: {close_response.status_code}, Response: {close_response.text[:200]}")
+                        log.warning(f"Failed to close scorecard '{card_id}'. Status: {close_response.status_code}, Response: {close_response.text[:200]}")
                     else:
-                         log.info(f"Scorecard '{card_id}' closed successfully.")
-                         log.info(f"View final scorecard online: {ROOT_URL}/scorecards/{card_id}")
+                        log.info(f"Scorecard '{card_id}' closed successfully.")
+                        log.info(f"View final scorecard online: {ROOT_URL}/scorecards/{card_id}")
             except requests.exceptions.RequestException as close_err:
-                 log.error(f"Network error closing scorecard '{card_id}': {close_err}")
+                log.error(f"Network error closing scorecard '{card_id}': {close_err}")
             except Exception as generic_close_err:
                 log.error(f"Unexpected error closing scorecard '{card_id}': {generic_close_err}")
         else:
-             log.warning("No scorecard opened or card_id lost; skipping close.")
+            log.warning("No scorecard opened or card_id lost; skipping close.")
 
         # Generate Final Reports
         overall_end_time = time.time()
@@ -387,30 +392,30 @@ def main():
         log.info(f"Total evaluation time: {total_duration:.2f} seconds.")
         
         if results_data: 
-             log.info("Calculating final statistics...")
-             # Pass the raw list of dicts to calculate_stats
-             game_stats, overall_summary = calculate_stats(results_data) 
+            log.info("Calculating final statistics...")
+            # Pass the raw list of dicts to calculate_stats
+            game_stats, overall_summary = calculate_stats(results_data) 
 
-             log.info(f"Generating console report...")
-             try:
-                 generate_console_report(results_data, args.suite, agent_name_cli, num_runs) 
-             except Exception as report_err:
-                 log.error(f"Failed to generate console report: {report_err}", exc_info=True)
+            log.info(f"Generating console report...")
+            try:
+                generate_console_report(results_data, args.suite, agent_name_cli, num_runs) 
+            except Exception as report_err:
+                log.error(f"Failed to generate console report: {report_err}", exc_info=True)
 
-             log.info(f"Saving summary report to: {results_filepath_txt}")
-             try:
-                 save_summary_report(
-                     str(results_filepath_txt), 
-                     game_stats, overall_summary, results_data, 
-                     agent_name_cli, args.suite, num_runs
-                 )
-             except Exception as save_err:
-                 log.error(f"Failed to save summary text report: {save_err}", exc_info=True)
+            log.info(f"Saving summary report to: {results_filepath_txt}")
+            try:
+                save_summary_report(
+                    str(results_filepath_txt), 
+                    game_stats, overall_summary, results_data, 
+                    agent_name_cli, args.suite, num_runs
+                )
+            except Exception as save_err:
+                log.error(f"Failed to save summary text report: {save_err}", exc_info=True)
         else: 
-             log.error("No evaluation results were collected. Cannot generate reports.")
-             # Print minimal summary if no data
-             print("\n--- Evaluation Summary (No Results) ---")
-             # ... (minimal summary print) ...
+            log.error("No evaluation results were collected. Cannot generate reports.")
+            # Print minimal summary if no data
+            print("\n--- Evaluation Summary (No Results) ---")
+            # ... (minimal summary print) ...
 
     log.info("Evaluation script finished.")
 

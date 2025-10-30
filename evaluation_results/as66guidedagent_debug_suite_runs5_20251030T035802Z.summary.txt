@@ -1,0 +1,53 @@
+--- Evaluation Summary Report ---
+Agent: as66guidedagent
+Suite: debug_suite
+Requested Runs per Game: 5
+Generated At: 2025-10-30T03:14:55.088964
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 5
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 11620.71s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 2.2
+    Avg Highest Level Reached: 3.2
+    Avg Total Actions (Per Run): 200.0
+    Avg Run Duration: 11620.71s
+    Avg Total Game Overs (Per Run): 0.8
+
+  Level Statistics (Averaged per Attempt):
+    ----------------------------------------------------------------------------------------
+    Lvl |  Avg Actions |  Avg Duration |  Avg State ∆ |   Avg GOs |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------
+      1 |         11.8 |       613.17s |          9.4 |       0.0 |      100.0% |          5
+      2 |          8.6 |       493.41s |          7.4 |       0.2 |       80.0% |          5
+      3 |         46.0 |      2579.66s |         35.2 |       0.5 |       25.0% |          4
+      4 |          7.0 |       355.87s |          6.0 |       0.0 |      100.0% |          1
+      5 |          1.0 |        50.15s |          1.0 |       1.0 |        0.0% |          1
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: TIMEOUT         Score=   2, HighestLvl= 3, Actions= 200, Dur=11403.22s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/6b57147a-0ef1-4084-a5a1-f7833c6354d6
+  Run  2: TIMEOUT         Score=   4, HighestLvl= 5, Actions= 200, Dur=11593.74s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/7d066212-ff27-412e-b151-2249bea31c8a
+  Run  3: TIMEOUT         Score=   2, HighestLvl= 3, Actions= 200, Dur=11707.62s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/fb6bc6bd-9187-4a31-9ef6-25d1e5742340
+  Run  4: TIMEOUT         Score=   2, HighestLvl= 3, Actions= 200, Dur=11586.79s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/181329da-deac-4ae1-b8a5-eb9546392569
+  Run  5: TIMEOUT         Score=   1, HighestLvl= 2, Actions= 200, Dur=11812.18s -> https://three.arcprize.org/replay/as66-821a4dcad9c2/9bb39a1a-06a1-4e7a-bf8b-8784670d0c40
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---

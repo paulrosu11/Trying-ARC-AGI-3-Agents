@@ -1,4 +1,5 @@
 from .agent import AS66GuidedAgent, AS66VisualGuidedAgent
+from .agent import AS66GuidedAgentImageOnly, AS66GuidedAgentTextAndImage
 from .agent64 import AS66GuidedAgent64
 from .agent_memory import AS66MemoryAgent
 from .manual_script import AS66ManualScriptText, AS66ManualScriptVision
@@ -14,4 +15,6 @@ __all__ = [
     "downsample_4x4",
     "matrix16_to_lines",
     "ds16_png_bytes",
+    "AS66GuidedAgentImageOnly",
+    "AS66GuidedAgentTextAndImage",
 ]

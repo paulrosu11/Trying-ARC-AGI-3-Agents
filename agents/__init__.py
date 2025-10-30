@@ -22,6 +22,8 @@ from .templates.as66 import (
     AS66ManualScriptVision,
     AS66GuidedAgent64,
     AS66MemoryAgent,
+    AS66GuidedAgentImageOnly,
+    AS66GuidedAgentTextAndImage,
 )
 
 load_dotenv()
@@ -63,6 +65,8 @@ AVAILABLE_AGENTS.update({
     "as66guidedagent64": AS66GuidedAgent64,
     "as66memoryagent": AS66MemoryAgent,
     "as66-memory": AS66MemoryAgent,
+    "as66-image-only": AS66GuidedAgentImageOnly,
+    "as66-text-and-image": AS66GuidedAgentTextAndImage,
 })
 
 __all__ = [

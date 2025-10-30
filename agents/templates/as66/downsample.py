@@ -12,7 +12,8 @@ Visual mode: you may render PNGs, but do not leak numbers into text prompts.
 from __future__ import annotations
 from typing import Iterable, List, Callable
 import io
-from PIL import Image
+import base64
+from PIL import Image, ImageDraw, ImageFont
 
 
 Number = float | int
@@ -109,4 +110,68 @@ def ds16_png_bytes(ds16: List[List[int]], cell: int = 22) -> bytes:
                     px[x * cell + dx, y * cell + dy] = rgb
     buf = io.BytesIO()
     im.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+# --- New function for "screenshot" of numeric grid ---
+
+def generate_numeric_grid_image_bytes(grid: List[List[int]]) -> bytes:
+    """
+    Generates a PNG 'screenshot' of the 16x16 grid with numbers and headers.
+    """
+    cell_size = 24
+    header_size = 24
+    grid_size = 16
+    img_size_w = (grid_size * cell_size) + header_size
+    img_size_h = (grid_size * cell_size) + header_size
+
+    bg_color = "#FFFFFF"
+    line_color = "#000000"
+    text_color = "#000000"
+    header_bg = "#EEEEEE"
+
+    img = Image.new("RGB", (img_size_w, img_size_h), bg_color)
+    draw = ImageDraw.Draw(img)
+    
+    try:
+        # Use a basic, widely available font. Fallback to default if needed.
+        try:
+            # Try a common truetype font
+            font = ImageFont.truetype("Arial.ttf", 10)
+        except IOError:
+            # Fallback to default bitmap font
+            font = ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+
+    # Draw headers
+    draw.rectangle([0, 0, img_size_w, header_size], fill=header_bg)
+    draw.rectangle([0, 0, header_size, img_size_h], fill=header_bg)
+    for i in range(grid_size):
+        # Column headers
+        x_center = header_size + (i * cell_size) + (cell_size // 2)
+        y_center = header_size // 2
+        draw.text((x_center, y_center), str(i), fill=text_color, font=font, anchor="mm")
+        # Row headers
+        x_center = header_size // 2
+        y_center = header_size + (i * cell_size) + (cell_size // 2)
+        draw.text((x_center, y_center), str(i), fill=text_color, font=font, anchor="mm")
+
+    # Draw grid lines and numbers
+    for y in range(grid_size):
+        for x in range(grid_size):
+            x0 = header_size + (x * cell_size)
+            y0 = header_size + (y * cell_size)
+            x1 = x0 + cell_size
+            y1 = y0 + cell_size
+            
+            # Draw cell border
+            draw.rectangle([x0, y0, x1, y1], outline=line_color)
+            
+            # Draw number
+            if y < len(grid) and x < len(grid[y]):
+                num_str = str(grid[y][x])
+                draw.text((x0 + cell_size // 2, y0 + cell_size // 2), num_str, fill=text_color, font=font, anchor="mm")
+
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
     return buf.getvalue()

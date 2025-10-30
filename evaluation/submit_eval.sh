@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=arc-3-eval
+#SBATCH --job-name=arc-3-eval-as66-memory
 #SBATCH --partition=compsci-gpu          # Use a CPU partition (adjust if needed)
 #SBATCH --cpus-per-task=16           # Request 16 CPUs (adjust based on max_workers + overhead)
 #SBATCH --mem=64G                    # Request 64GB memory (adjust if needed)
@@ -50,13 +50,15 @@ fi
 
 # --- Run the Evaluation Command ---
 
-echo "[INFO] Starting evaluation command..."
+echo "[INFO] Starting evaluation command for as66guidedagent with GENERAL prompts..."
+
+export ARCGAME_GENERAL_PROMPTS=1 
+
 uv run evaluation/evaluate.py \
-    --agent as66guidedagent \
+    --agent as66-memory\
     --suite debug_suite \
     --num_runs 5 \
     --max_workers 10 \
     --max_actions 200
 
 echo "[INFO] Evaluation command finished."
-
