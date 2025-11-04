@@ -32,7 +32,7 @@ class AS66MemoryAgent(GuidedLLM):
     This version uses a three-call process: Hypothesis Update, Observation, and Action Selection.
     """
     MAX_ACTIONS = 200
-    MODEL = "gpt-5"
+    MODEL = os.getenv("AGENT_MODEL_OVERRIDE", "gpt-5")
     REASONING_EFFORT = "low"
     DOWNSAMPLE = True
     MEMORY_DIR = Path("memory")
