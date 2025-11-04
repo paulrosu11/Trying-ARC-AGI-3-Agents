@@ -1,0 +1,46 @@
+--- Evaluation Summary Report ---
+Agent: as66guidedagent
+Suite: debug_suite
+Requested Runs per Game: 1
+Generated At: 2025-11-02T00:29:06.290542
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 1
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 147.41s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged Across Runs)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 1
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 1.0
+    Avg Highest Level Reached: 2.0
+    Avg Total Actions (Per Run): 3.0
+    Avg Run Duration: 147.41s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |                3.0 |                  3.0 |            0.0 |          3.0 |      100.0% |          1
+      2 |                0.0 |                  N/A |            0.0 |          0.0 |        0.0% |          1
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: TIMEOUT         Score=   1, HighestLvl= 2, Actions=   3, Dur= 147.41s, GOs=  0 -> https://three.arcprize.org/replay/as66-821a4dcad9c2/e1160b83-ae75-4eb3-aa20-3828162684a9
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---

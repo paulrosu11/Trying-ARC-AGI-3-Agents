@@ -1,22 +1,21 @@
-# evaluation/evaluate.py
-
 import argparse
-import logging
+import logging  # <-- ADDED THIS LINE
 import os
 import sys
 import time
 import threading
 import json
-import dataclasses 
-from datetime import datetime, timezone 
+import dataclasses
+from datetime import datetime, timezone
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, List 
-from concurrent.futures import ThreadPoolExecutor, as_completed 
+from typing import Any, Dict, Optional, Type, List, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+import openai
 from requests.cookies import RequestsCookieJar
-from dotenv import load_dotenv 
+from dotenv import load_dotenv
 
 # Add project root to sys.path
 project_root = Path(__file__).resolve().parents[1]
@@ -31,15 +30,59 @@ from agents import AVAILABLE_AGENTS
 from agents.agent import Agent
 from agents.structs import FrameData, GameAction, GameState
 from evaluation.config import EVALUATION_GAMES
-# Import LevelMetrics as well
-from evaluation.metrics import GameMetrics, LevelMetrics 
-# Import the specific functions needed from report
-from evaluation.report import generate_console_report, save_summary_report, calculate_stats 
+# Import the new metrics structures
+from evaluation.metrics import GameMetrics, LevelMetrics, AttemptMetrics
+from evaluation.report import generate_console_report, save_summary_report, calculate_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
 
 ROOT_URL = os.environ.get("ROOT_URL", "https://three.arcprize.org")
+
+# --- Agent Variant Helper ---
+def get_agent_variant_tag(agent_name: str) -> str:
+    """
+    Checks for known environment variables that create agent "variants"
+    and returns a tag for the filename.
+    """
+    if agent_name.startswith("as66"):
+        # Check for the general prompts env var you mentioned
+        if os.getenv("ARCGAME_GENERAL_PROMPTS", "0").strip().lower() in ("1", "true", "yes", "on"):
+            return "general"
+    
+    # Add other checks for other agents here
+    # e.g., if agent_name == "my_other_agent":
+    #           if os.getenv("SOME_OTHER_FLAG"):
+    #               return "variant-x"
+
+    return "" # Default: no variant
+
+# --- Retry Helper ---
+MAX_RETRIES = 5
+INITIAL_BACKOFF = 1 # in seconds
+
+def _run_with_retries(func_to_run: Callable, *args: Any, **kwargs: Any) -> Any:
+    """
+    Runs a function with exponential backoff for specific retriable API errors.
+    """
+    retries = 0
+    backoff = INITIAL_BACKOFF
+    while True:
+        try:
+            return func_to_run(*args, **kwargs)
+        except (openai.RateLimitError, requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+            if retries >= MAX_RETRIES:
+                log.error(f"Final attempt failed for {func_to_run.__name__} after {retries} retries. Raising error.")
+                raise e # Re-raise the error to be caught by the main try/except
+            
+            log.warning(f"API error detected for {func_to_run.__name__}: {type(e).__name__}. Retrying in {backoff}s... (Attempt {retries + 1}/{MAX_RETRIES})")
+            time.sleep(backoff)
+            retries += 1
+            backoff *= 2 # Exponential backoff
+        # Any other exception (e.g., logic error, validation error) should not be retried and will be caught by the main handler.
+        except Exception as e:
+            log.error(f"Non-retriable error in {func_to_run.__name__}: {e}", exc_info=False) # Log minimal info
+            raise e # Re-raise
 
 # --- Function to run a single game attempt ---
 def evaluate_single_game(
@@ -48,7 +91,7 @@ def evaluate_single_game(
     max_actions_per_game: int,
     run_index: int 
 ) -> GameMetrics:
-    """Runs a single game evaluation, tracking per-level metrics."""
+    """Runs a single game evaluation, tracking per-level and per-attempt metrics."""
     
     run_metrics = GameMetrics(
         game_id=game_id, 
@@ -56,116 +99,139 @@ def evaluate_single_game(
         run_index=run_index, 
         start_time=time.time() 
     )
-    run_metrics.run_status = "IN_PROGRESS"
+    run_metrics.status = "IN_PROGRESS"
     
-    # --- Level Tracking State ---
+    # --- Level & Attempt Tracking State ---
     current_level_number = 1
     current_level_metrics = LevelMetrics(level_number=current_level_number)
-    level_start_time = time.time()
-    # --------------------------
+    current_attempt_number = 1
+    current_attempt_metrics = AttemptMetrics(attempt_number=current_attempt_number)
+    level_start_time = time.time() # This will reset for the first attempt of each level
+    attempt_start_time = level_start_time
+    # ------------------------------------
 
     max_score = 0
     total_actions_this_run = 0 
+    loop_exited_normally = False # Flag to track if loop timed out
 
     try:
-        frame = agent.take_action(GameAction.RESET)
+        # Use retry helper for initial RESET
+        frame = _run_with_retries(agent.take_action, GameAction.RESET)
         if not frame:
+            # This check remains, as _run_with_retries might return None if the underlying function does
             raise ConnectionError(f"Failed to RESET game {game_id} (Run {run_index}).")
         
         agent.append_frame(frame) 
         run_metrics.start_time = time.time() # Refined start time
         level_start_time = run_metrics.start_time # Start level 1 timer
+        attempt_start_time = run_metrics.start_time # Start attempt 1 timer
 
         while total_actions_this_run < max_actions_per_game:
-            action = agent.choose_action(agent.frames, agent.frames[-1])
+            # Use retry helper for choose_action (LLM call)
+            action = _run_with_retries(agent.choose_action, agent.frames, agent.frames[-1])
             previous_frame = agent.frames[-1]
-            latest_frame = agent.take_action(action)
+            # Use retry helper for take_action (Game server call)
+            latest_frame = _run_with_retries(agent.take_action, action)
             
             # Action completed, update counters BEFORE checking for errors/completion
             agent.action_counter += 1 
             total_actions_this_run += 1
-            current_level_metrics.actions += 1 # Increment current level actions
+            current_attempt_metrics.actions += 1 # Increment current attempt actions
 
             if not latest_frame:
                 log.error(f"[{game_id} Run {run_index}] Agent failed to get a valid frame after action {action.name}. Stopping.")
+                current_attempt_metrics.status = "ERROR"
                 current_level_metrics.status = "ERROR"
-                run_metrics.run_status = "ERROR"
+                run_metrics.status = "ERROR"
+                run_metrics.error_message = "Agent failed to get a valid frame." # <-- STORE ERROR
                 break
             
             agent.append_frame(latest_frame)
             max_score = max(max_score, latest_frame.score)
             run_metrics.highest_level_reached = max(run_metrics.highest_level_reached, current_level_number)
 
-            # --- Update Level Metrics ---
+            # --- Update Attempt Metrics ---
             if latest_frame.frame != previous_frame.frame:
-                current_level_metrics.state_changes += 1
+                current_attempt_metrics.state_changes += 1
 
             # --- Handle Level Completion ---
             level_completed = (latest_frame.score > previous_frame.score and 
                                latest_frame.state != GameState.WIN and 
-                               latest_frame.state != GameState.GAME_OVER) # Ensure score increase isn't due to reset after win/loss
+                               latest_frame.state != GameState.GAME_OVER)
                                
             if level_completed:
-                level_end_time = time.time()
-                current_level_metrics.duration_seconds = level_end_time - level_start_time
+                attempt_end_time = time.time()
+                current_attempt_metrics.duration_seconds = attempt_end_time - attempt_start_time
+                current_attempt_metrics.status = "COMPLETED"
+                current_level_metrics.attempts.append(current_attempt_metrics) # Store final attempt
+                
                 current_level_metrics.status = "COMPLETED"
                 run_metrics.level_metrics[current_level_number] = current_level_metrics # Store completed level metrics
                 
-                log.info(f"[{game_id} Run {run_index}] Level {current_level_number} COMPLETED. Actions: {current_level_metrics.actions}, Duration: {current_level_metrics.duration_seconds:.2f}s. Score: {latest_frame.score}.")
+                log.info(f"[{game_id} Run {run_index}] Level {current_level_number} COMPLETED. Successful Attempt: {current_attempt_number} ({current_attempt_metrics.actions} actions). Total Level Actions: {current_level_metrics.total_actions}. Score: {latest_frame.score}.")
 
                 # Start next level
                 current_level_number += 1
                 run_metrics.highest_level_reached = max(run_metrics.highest_level_reached, current_level_number)
-                current_level_metrics = LevelMetrics(level_number=current_level_number) # Reset for next level
-                level_start_time = level_end_time # Start timer for the new level
+                
+                # Reset for new level
+                current_level_metrics = LevelMetrics(level_number=current_level_number)
+                current_attempt_number = 1
+                current_attempt_metrics = AttemptMetrics(attempt_number=current_attempt_number)
+                level_start_time = attempt_end_time
+                attempt_start_time = attempt_end_time
 
             # --- Handle Game Over ---
-            if latest_frame.state == GameState.GAME_OVER:
-                current_level_metrics.game_overs += 1 # Count game over for the current level
-                run_metrics.total_game_overs += 1 # Count for the whole run
-                log.warning(f"[{game_id} Run {run_index}] Game Over on Level {current_level_number}. Issuing RESET.")
+            elif latest_frame.state == GameState.GAME_OVER:
+                attempt_end_time = time.time()
+                current_attempt_metrics.duration_seconds = attempt_end_time - attempt_start_time
+                current_attempt_metrics.status = "GAME_OVER"
+                current_attempt_metrics.game_overs = 1 # This attempt ended in a game over
+                current_level_metrics.attempts.append(current_attempt_metrics) # Store failed attempt
                 
-                # Finalize current level metrics before reset (as TIMEOUT/ERROR state)
-                level_end_time = time.time()
-                current_level_metrics.duration_seconds = level_end_time - level_start_time
-                current_level_metrics.status = "GAME_OVER" 
-                run_metrics.level_metrics[current_level_number] = current_level_metrics
-
+                log.warning(f"[{game_id} Run {run_index}] Game Over on Level {current_level_number}, Attempt {current_attempt_number}. Actions this attempt: {current_attempt_metrics.actions}. Total Level Actions: {current_level_metrics.total_actions}.")
+                
                 # Issue reset
                 reset_action = GameAction.RESET 
-                latest_frame = agent.take_action(reset_action)
+                # Use retry helper for the RESET action
+                latest_frame = _run_with_retries(agent.take_action, reset_action)
                 if not latest_frame:
                     log.error(f"[{game_id} Run {run_index}] Failed to RESET after GAME_OVER. Stopping.")
-                    run_metrics.run_status = "ERROR"
+                    current_level_metrics.status = "ERROR"
+                    run_metrics.status = "ERROR"
+                    run_metrics.error_message = "Failed to RESET after GAME_OVER." # <-- STORE ERROR
                     break # Stop run on failed reset
                 agent.append_frame(latest_frame)
                 
-                # Start the level over
-                log.info(f"[{game_id} Run {run_index}] Restarting Level {current_level_number} after GAME_OVER.")
-                current_level_metrics = LevelMetrics(level_number=current_level_number) 
-                level_start_time = time.time() 
+                # Start the next attempt for the same level
+                current_attempt_number += 1
+                current_attempt_metrics = AttemptMetrics(attempt_number=current_attempt_number) 
+                attempt_start_time = time.time() 
 
             # --- Handle Win Condition ---
-            if latest_frame.state == GameState.WIN:
-                level_end_time = time.time()
-                current_level_metrics.duration_seconds = level_end_time - level_start_time
-                current_level_metrics.status = "COMPLETED" # Final level completed
+            elif latest_frame.state == GameState.WIN:
+                attempt_end_time = time.time()
+                current_attempt_metrics.duration_seconds = attempt_end_time - attempt_start_time
+                current_attempt_metrics.status = "COMPLETED"
+                current_level_metrics.attempts.append(current_attempt_metrics) # Store final successful attempt
+                
+                current_level_metrics.status = "COMPLETED"
                 run_metrics.level_metrics[current_level_number] = current_level_metrics 
-
-                run_metrics.run_status = "COMPLETED_RUN" # Mark the whole run as complete
-                log.info(f"[{game_id} Run {run_index}] Game COMPLETED successfully! Final Score: {latest_frame.score}")
+                
+                run_metrics.status = "COMPLETED_RUN" # Mark the whole run as complete
+                log.info(f"[{game_id} Run {run_index}] Game COMPLETED successfully! Final Level {current_level_number} actions: {current_attempt_metrics.actions}. Final Score: {latest_frame.score}")
                 break # Exit loop on win
 
-        # --- Handle Timeout Condition ---
+        # --- Handle Timeout Condition (Loop Exited Normally) ---
         else: 
-            run_metrics.run_status = "TIMEOUT"
-            current_level_metrics.status = "TIMEOUT" # Mark current level as timed out
-            log.warning(f"[{game_id} Run {run_index}] Game TIMEOUT after {total_actions_this_run} actions.")
+            loop_exited_normally = True # Set flag
 
     # --- Handle Errors ---
     except Exception as e:
-        run_metrics.run_status = "ERROR"
-        current_level_metrics.status = "ERROR" # Mark current level as errored
+        run_metrics.status = "ERROR"
+        run_metrics.error_message = str(e) # <-- STORE THE EXCEPTION TEXT
+        current_attempt_metrics.status = "ERROR"
+        current_level_metrics.status = "ERROR"
         log.error(f"[{game_id} Run {run_index}] Exception occurred: {e}", exc_info=True)
     
     # --- Finalize Metrics ---
@@ -173,39 +239,85 @@ def evaluate_single_game(
         run_metrics.end_time = time.time()
         run_metrics.run_duration_seconds = run_metrics.end_time - run_metrics.start_time
         
-        # Store the metrics for the last level if it wasn't already stored (e.g., timeout/error)
-        if current_level_number not in run_metrics.level_metrics:
-            # Ensure duration is calculated if not already set
-            if current_level_metrics.duration_seconds == 0.0:
-                current_level_metrics.duration_seconds = run_metrics.end_time - level_start_time
-            run_metrics.level_metrics[current_level_number] = current_level_metrics
-
-        # Aggregate totals from level metrics
-        run_metrics.total_state_changes = sum(lm.state_changes for lm in run_metrics.level_metrics.values())
-        run_metrics.total_game_overs = sum(lm.game_overs for lm in run_metrics.level_metrics.values()) # Recalculate based on level data
-
-        run_metrics.total_actions_taken = total_actions_this_run
-        run_metrics.final_score = max_score # Final score is max score achieved during run
+        # --- FIX: Robustly finalize status and last attempt ---
         
-        # Capture GUID and Construct CORRECT Replay URL
+        # Determine the final status of the last attempt
+        final_attempt_status = "UNKNOWN"
+        if run_metrics.status == "COMPLETED_RUN":
+            final_attempt_status = "COMPLETED" # This was set in the WIN block
+        elif loop_exited_normally:
+            final_attempt_status = "TIMEOUT"
+            log.warning(f"[{game_id} Run {run_index}] Game TIMEOUT after {total_actions_this_run} actions on Level {current_level_number}.")
+        elif run_metrics.status == "ERROR":
+            final_attempt_status = "ERROR"
+        elif run_metrics.status == "IN_PROGRESS": # Should only happen if loop broke unexpectedly
+            log.error(f"[{game_id} Run {run_index}] Run ended with IN_PROGRESS status. Marking as ERROR.")
+            final_attempt_status = "ERROR"
+            run_metrics.status = "ERROR"
+            if not run_metrics.error_message: # <-- STORE ERROR
+                run_metrics.error_message = "Run ended unexpectedly in IN_PROGRESS state."
+
+        # Update the last attempt *if it's still marked IN_PROGRESS*
+        if current_attempt_metrics.status == "IN_PROGRESS":
+            current_attempt_metrics.duration_seconds = run_metrics.end_time - attempt_start_time
+            current_attempt_metrics.status = final_attempt_status
+        
+        # Append the last attempt if it hasn't been appended yet
+        if not current_level_metrics.attempts or current_level_metrics.attempts[-1].attempt_number != current_attempt_metrics.attempt_number:
+             current_level_metrics.attempts.append(current_attempt_metrics)
+        
+        # Finalize the last level's status
+        if current_level_metrics.status == "IN_PROGRESS":
+            current_level_metrics.status = final_attempt_status
+
+        # Store the last level's metrics
+        if current_level_number not in run_metrics.level_metrics:
+             run_metrics.level_metrics[current_level_number] = current_level_metrics
+
+        # Set the final run status (if it's still IN_PROGRESS, set it to the final attempt status)
+        if run_metrics.status == "IN_PROGRESS":
+             run_metrics.status = final_attempt_status
+        # --- End of FIX ---
+
+        # Aggregate totals from the new LevelMetrics properties
+        run_metrics.run_total_actions = sum(lm.total_actions for lm in run_metrics.level_metrics.values())
+        run_metrics.total_game_overs_across_run = sum(lm.total_game_overs for lm in run_metrics.level_metrics.values())
+        run_metrics.total_state_changes_across_run = sum(lm.total_state_changes for lm in run_metrics.level_metrics.values())
+        
+        # This now correctly reflects the *true* total actions from the loop
+        run_metrics.total_actions_taken = total_actions_this_run 
+        
+        # This check is crucial: if the loop counter (e.g. 20) doesn't match the sum (e.g. 19), log it.
+        # This can happen if an error occurs *during* the final action, where total_actions_this_run is 20
+        # but the final attempt's action count is still 19. We trust the loop counter.
+        if run_metrics.run_total_actions != total_actions_this_run and run_metrics.status != "ERROR":
+             log.warning(f"[{game_id} Run {run_index}] Mismatch! Loop counter `total_actions_this_run` is {total_actions_this_run}, but summed `run_total_actions` is {run_metrics.run_total_actions}. Using loop counter.")
+             # Correct the metric to reflect the max_actions timeout
+             run_metrics.run_total_actions = total_actions_this_run
+        elif run_metrics.status == "ERROR":
+             # If an error happened, the loop counter is the source of truth
+             run_metrics.run_total_actions = total_actions_this_run
+
+
+        run_metrics.final_score = max_score
+        
         run_metrics.guid = agent.guid 
-        if run_metrics.guid and agent.game_id: # Use agent's game_id
-            # Correct URL Format: /replay/{game_id}/{guid}
+        if run_metrics.guid and agent.game_id:
             run_metrics.replay_url = f"{ROOT_URL}/replay/{agent.game_id}/{run_metrics.guid}" 
             log.debug(f"[{game_id} Run {run_index}] Captured guid: {run_metrics.guid}, Replay URL: {run_metrics.replay_url}")
         else:
             log.warning(f"[{game_id} Run {run_index}] Could not capture GUID for replay link.")
             run_metrics.replay_url = None
         
-    
-        # Call cleanup on the agent to ensure transcripts are flushed and closed
-        agent.cleanup()
+        
+        # Call cleanup on the agent
+        agent.cleanup() 
  
 
     return run_metrics
 
 
-# --- Task Wrapper for Parallel Execution (Unchanged) ---
+# --- Task Wrapper for Parallel Execution ---
 def run_evaluation_task(
     game_id: str, 
     run_index: int, 
@@ -218,25 +330,32 @@ def run_evaluation_task(
     """Creates an agent and runs evaluate_single_game for one task."""
     
     log.debug(f"Task starting: Game {game_id}, Run {run_index}")
+    
+    # --- FIX: Pass the *full* agent name with variant to the agent instance ---
+    # This allows the agent itself to know its variant if needed
+    agent_variant_tag = get_agent_variant_tag(agent_name_cli)
+    agent_name_full = f"{agent_name_cli}-{agent_variant_tag}" if agent_variant_tag else agent_name_cli
+    
     agent_instance = agent_class(
         card_id=card_id,
         game_id=game_id,
-        agent_name=agent_name_cli, 
+        agent_name=agent_name_full, # Pass the full name
         ROOT_URL=ROOT_URL,
-        record=False,  
+        record=False, 
         cookies=deepcopy(cookies) 
     )
+    # The GameMetrics object will now also store this full name
     metrics = evaluate_single_game( 
         agent=agent_instance,
         game_id=game_id,
         max_actions_per_game=max_actions,
         run_index=run_index 
     )
-    log.debug(f"Task finished: Game {game_id}, Run {run_index} -> Status: {metrics.run_status}")
+    log.debug(f"Task finished: Game {game_id}, Run {run_index} -> Status: {metrics.status}")
     return metrics
 
 
-# --- Main Function (Mostly Unchanged, calls updated report functions) ---
+# --- Main Function ---
 def main():
     parser = argparse.ArgumentParser(description="Run parallel agent evaluation with reruns.")
     parser.add_argument("--agent", required=True, choices=list(AVAILABLE_AGENTS.keys()), help="The name of the agent to evaluate.")
@@ -252,7 +371,7 @@ def main():
     num_runs = args.num_runs
     max_workers = args.max_workers
     
-    log.info(f"Agent: '{agent_name_cli}', Suite: '{args.suite}', Games: {len(game_ids)}, Runs per game: {num_runs}, Max workers: {max_workers}")
+    log.info(f"Agent: '{agent_name_cli}', Suite: '{args.suite}', Games: {len(game_ids)}, Runs per game: {num_runs}, Max workers: {max_workers}, Max Actions: {args.max_actions}")
 
     card_id: Optional[str] = None
     api_key = os.getenv("ARC_API_KEY", "") 
@@ -262,11 +381,21 @@ def main():
     headers = {"X-API-Key": api_key, "Accept": "application/json"}
     cookies: Optional[RequestsCookieJar] = None
     
-    # Setup Results Files
+    # --- Setup Results Files (with new naming convention) ---
     results_dir = Path("evaluation_results")
     results_dir.mkdir(exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") 
-    base_filename = f"{agent_name_cli}_{args.suite}_runs{num_runs}_{timestamp}"
+    
+    # Get variant tag
+    agent_variant_tag = get_agent_variant_tag(agent_name_cli)
+    if agent_variant_tag:
+        agent_name_with_variant = f"{agent_name_cli}-{agent_variant_tag}"
+    else:
+        agent_name_with_variant = agent_name_cli
+    
+    # Build comprehensive filename
+    base_filename = f"{agent_name_with_variant}_{args.suite}_runs{num_runs}_max{args.max_actions}_{timestamp}"
+    
     results_filepath_jsonl = results_dir / f"{base_filename}.jsonl"
     results_filepath_txt = results_dir / f"{base_filename}.summary.txt" 
     file_lock = threading.Lock()
@@ -274,13 +403,13 @@ def main():
     log.info(f"Summary report (TXT): {results_filepath_txt}")
 
     overall_start_time = time.time()
-    results_data: List[Dict[str, Any]] = [] 
+    results_data: List[Dict[str, Any]] = [] # Store raw dicts for JSONL
 
     try:
         # Open Scorecard
         with requests.Session() as s:
             s.headers.update(headers)
-            tags = [f"eval-{agent_name_cli}", args.suite, f"runs-{num_runs}", f"workers-{max_workers}"]
+            tags = [f"eval-{agent_name_with_variant}", args.suite, f"runs-{num_runs}", f"workers-{max_workers}", f"max_actions-{args.max_actions}"]
             log.info(f"Attempting to open scorecard with URL: {ROOT_URL}/api/scorecard/open")
             r = s.post(f"{ROOT_URL}/api/scorecard/open", json={"tags": tags}, timeout=30)
             log.info(f"Scorecard open response status: {r.status_code}") 
@@ -304,6 +433,9 @@ def main():
         total_tasks = len(tasks_to_run)
         log.info(f"Total evaluation tasks to run: {total_tasks}")
         
+        # This list will hold the GameMetrics objects for final reporting
+        game_metrics_objects_list: List[GameMetrics] = []
+
         # Execute in Parallel
         completed_tasks = 0
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -319,35 +451,52 @@ def main():
                 game_id, run_index = future_to_task[future]
                 try:
                     result_metrics: GameMetrics = future.result()
+                    # Store the object for final stats
+                    game_metrics_objects_list.append(result_metrics) 
+                    
+                    # Convert to dict for JSONL saving
                     metrics_dict = dataclasses.asdict(result_metrics)
-                    results_data.append(metrics_dict) 
                     
                     # Incremental Saving to JSONL
                     with file_lock:
                         with open(results_filepath_jsonl, "a", encoding="utf-8") as f:
-                            # Convert nested LevelMetrics properly for JSON
+                            # Convert nested metrics properly for JSON
                             metrics_dict_serializable = deepcopy(metrics_dict)
                             metrics_dict_serializable['level_metrics'] = {
                                 str(k): dataclasses.asdict(v) 
                                 for k, v in result_metrics.level_metrics.items()
                             }
+                            # Convert LevelMetrics.attempts
+                            for k_lm, v_lm in metrics_dict_serializable['level_metrics'].items():
+                                v_lm['attempts'] = [dataclasses.asdict(att) for att in result_metrics.level_metrics[int(k_lm)].attempts]
+                                # Pop derived properties, they will be recalculated on load
+                                v_lm.pop('total_actions', None)
+                                v_lm.pop('total_game_overs', None)
+                                v_lm.pop('total_state_changes', None)
+                                v_lm.pop('actions_in_successful_attempt', None)
+                                v_lm.pop('state_change_percentage', None)
+
                             metrics_dict_serializable['start_time_iso'] = datetime.fromtimestamp(metrics_dict['start_time'], timezone.utc).isoformat()
                             metrics_dict_serializable['end_time_iso'] = datetime.fromtimestamp(metrics_dict['end_time'], timezone.utc).isoformat()
                             f.write(json.dumps(metrics_dict_serializable) + "\n")
-                        
+                            
                     completed_tasks += 1
                     log.info(f"Progress: {completed_tasks}/{total_tasks} tasks completed.")
 
                 except Exception as exc:
                     log.error(f"Task {game_id} (Run {run_index}) generated an exception: {exc}", exc_info=True)
                     error_metric_obj = GameMetrics( 
-                        game_id=game_id, agent_name=agent_name_cli, run_index=run_index, 
-                        run_status="ERROR", start_time=time.time() 
+                        game_id=game_id, agent_name=agent_name_with_variant, run_index=run_index, 
+                        status="ERROR", start_time=time.time(),
+                        error_message=str(exc) # <-- STORE THE EXCEPTION TEXT
                     )
                     error_metric_obj.end_time = time.time()
                     error_metric_obj.run_duration_seconds = error_metric_obj.end_time - error_metric_obj.start_time 
+                    
+                    # Store object for final stats
+                    game_metrics_objects_list.append(error_metric_obj)
+                    
                     err_dict = dataclasses.asdict(error_metric_obj)
-                    results_data.append(err_dict) 
 
                     with file_lock:
                         with open(results_filepath_jsonl, "a", encoding="utf-8") as f:
@@ -391,14 +540,16 @@ def main():
         total_duration = overall_end_time - overall_start_time
         log.info(f"Total evaluation time: {total_duration:.2f} seconds.")
         
-        if results_data: 
+        if game_metrics_objects_list: 
             log.info("Calculating final statistics...")
-            # Pass the raw list of dicts to calculate_stats
-            game_stats, overall_summary = calculate_stats(results_data) 
+            
+            # Pass the list of GameMetrics objects
+            game_stats, overall_summary = calculate_stats(game_metrics_objects_list) 
 
             log.info(f"Generating console report...")
             try:
-                generate_console_report(results_data, args.suite, agent_name_cli, num_runs) 
+                # Pass the list of GameMetrics objects
+                generate_console_report(game_metrics_objects_list, args.suite, agent_name_with_variant, num_runs) 
             except Exception as report_err:
                 log.error(f"Failed to generate console report: {report_err}", exc_info=True)
 
@@ -406,18 +557,22 @@ def main():
             try:
                 save_summary_report(
                     str(results_filepath_txt), 
-                    game_stats, overall_summary, results_data, 
-                    agent_name_cli, args.suite, num_runs
+                    game_stats, overall_summary, game_metrics_objects_list, # Pass objects
+                    agent_name_with_variant, args.suite, num_runs
                 )
             except Exception as save_err:
                 log.error(f"Failed to save summary text report: {save_err}", exc_info=True)
         else: 
             log.error("No evaluation results were collected. Cannot generate reports.")
-            # Print minimal summary if no data
             print("\n--- Evaluation Summary (No Results) ---")
-            # ... (minimal summary print) ...
+            print(f"Agent: {agent_name_with_variant}")
+            print(f"Suite: {args.suite}")
+            print(f"Total Runs Attempted: 0")
+            print(f"Total Duration: {total_duration:.2f}s")
+            print("---------------------------------------")
 
     log.info("Evaluation script finished.")
 
 if __name__ == "__main__":
     main()
+

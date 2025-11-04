@@ -1,0 +1,176 @@
+--- Evaluation Summary Report ---
+Agent: as66guidedagent-general
+Suite: standard_suite
+Requested Runs per Game: 5
+Generated At: 2025-11-02T06:56:51.872930
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 30
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 2254.04s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged Across Runs)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 1.4
+    Avg Highest Level Reached: 2.4
+    Avg Total Actions (Per Run): 73.2
+    Avg Run Duration: 3197.79s
+    Avg Total Game Overs (Per Run): 1.4
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               23.4 |                 14.6 |            0.4 |         20.6 |      100.0% |          5
+      2 |               43.4 |                  7.5 |            1.0 |         31.6 |       40.0% |          5
+      3 |               16.0 |                  N/A |            0.0 |         15.0 |        0.0% |          2
+
+================================================================================
+Game ID: ft09-b8377d4b7815
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 42.8
+    Avg Run Duration: 2158.50s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               42.8 |                  N/A |            0.0 |          0.0 |        0.0% |          5
+
+================================================================================
+Game ID: lp85-d265526edbaa
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 36.6
+    Avg Run Duration: 1609.73s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               36.6 |                  N/A |            0.0 |          9.6 |        0.0% |          5
+
+================================================================================
+Game ID: ls20-fa137e247ce6
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 14.2
+    Avg Run Duration: 653.16s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               14.2 |                  N/A |            0.0 |          4.4 |        0.0% |          5
+
+================================================================================
+Game ID: sp80-0605ab9e5b2a
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 19.2
+    Avg Run Duration: 653.57s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               19.2 |                  N/A |            0.0 |         10.6 |        0.0% |          5
+
+================================================================================
+Game ID: vc33-6ae7bf49eea5
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 122.8
+    Avg Run Duration: 5251.48s
+    Avg Total Game Overs (Per Run): 0.0
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |              122.8 |                  N/A |            0.0 |          1.6 |        0.0% |          5
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: ERROR           Score=   1, HighestLvl= 2, Actions= 130, Dur=5819.99s, GOs=  3 -> https://three.arcprize.org/replay/as66-821a4dcad9c2/3a5337af-47a9-4163-9c2a-f600d8a919ce
+  Run  2: ERROR           Score=   1, HighestLvl= 2, Actions=  73, Dur=3055.78s, GOs=  2 -> https://three.arcprize.org/replay/as66-821a4dcad9c2/8b588880-a3e8-4cee-9a92-0b941abd47ba
+  Run  3: ERROR           Score=   2, HighestLvl= 3, Actions= 131, Dur=5807.24s, GOs=  2 -> https://three.arcprize.org/replay/as66-821a4dcad9c2/a04c255a-0790-45ad-b7b1-b0b3e3b2ff20
+  Run  4: ERROR           Score=   1, HighestLvl= 2, Actions=  16, Dur= 645.50s, GOs=  0 -> https://three.arcprize.org/replay/as66-821a4dcad9c2/953d58ca-f47f-49c1-9087-d9ecab318796
+  Run  5: ERROR           Score=   2, HighestLvl= 3, Actions=  16, Dur= 660.42s, GOs=  0 -> https://three.arcprize.org/replay/as66-821a4dcad9c2/d0f2525c-a13c-435d-bd52-48b55c8325d8
+
+Game: ft09-b8377d4b7815
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions= 114, Dur=5809.44s, GOs=  0 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/0476e821-1bfd-48c9-b889-43bc3d7fa071
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  14, Dur= 652.17s, GOs=  0 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/bbf80431-8ec1-4e2b-b74f-a636df4beb7c
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions=  13, Dur= 660.20s, GOs=  0 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/322502d1-3822-4906-8dfe-f1f37aa9d19c
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions=  59, Dur=3026.46s, GOs=  0 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/a5cc025f-d5a3-4d7c-a02c-2a9cd47fc95f
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions=  14, Dur= 644.21s, GOs=  0 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/182be084-3b79-4f3c-82e2-46a16921217e
+
+Game: lp85-d265526edbaa
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  68, Dur=3027.12s, GOs=  0 -> https://three.arcprize.org/replay/lp85-d265526edbaa/80050a13-cfb0-4208-8b5e-a9229e648ecf
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 664.06s, GOs=  0 -> https://three.arcprize.org/replay/lp85-d265526edbaa/257504da-5617-4d5e-90a9-7d6252894533
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions=  14, Dur= 641.19s, GOs=  0 -> https://three.arcprize.org/replay/lp85-d265526edbaa/023cf47b-1ed8-458e-b566-887218095dc7
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions=  71, Dur=3076.50s, GOs=  0 -> https://three.arcprize.org/replay/lp85-d265526edbaa/089ce708-00b1-4d68-b4c0-f71f9cf6a297
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 639.78s, GOs=  0 -> https://three.arcprize.org/replay/lp85-d265526edbaa/54165165-d825-4b13-a6df-beba69726199
+
+Game: ls20-fa137e247ce6
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 646.18s, GOs=  0 -> https://three.arcprize.org/replay/ls20-fa137e247ce6/e40399ae-0635-44f4-8da5-a0824f0544fa
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 661.46s, GOs=  0 -> https://three.arcprize.org/replay/ls20-fa137e247ce6/7ef7f96e-b51f-4b1a-a3c1-2b18d08c0aae
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions=  14, Dur= 659.41s, GOs=  0 -> https://three.arcprize.org/replay/ls20-fa137e247ce6/55bf97ec-5c11-42dd-b2b1-4501a8a142aa
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions=  13, Dur= 638.97s, GOs=  0 -> https://three.arcprize.org/replay/ls20-fa137e247ce6/05105915-db29-47b9-b30a-48fe6fe71179
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions=  14, Dur= 659.78s, GOs=  0 -> https://three.arcprize.org/replay/ls20-fa137e247ce6/ad659ffa-fff5-48b2-8195-041b2b4565a9
+
+Game: sp80-0605ab9e5b2a
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  19, Dur= 665.66s, GOs=  0 -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/394f3e77-0217-43c3-84c0-e1f980bc826b
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  19, Dur= 657.76s, GOs=  0 -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/5bc7223e-34d1-4a1e-a894-87a0365bf515
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions=  19, Dur= 645.00s, GOs=  0 -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/516d1073-3fcf-4f9e-99c8-a5bb08cf21c8
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions=  19, Dur= 640.56s, GOs=  0 -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/83bd6f58-93fa-4d4f-98c6-5b0b7ae700b3
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions=  20, Dur= 658.88s, GOs=  0 -> https://three.arcprize.org/replay/sp80-0605ab9e5b2a/77a40e19-558a-413a-831e-9fce39c49070
+
+Game: vc33-6ae7bf49eea5
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 650.87s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/75042173-c6bb-4b9f-a74b-ea85c184dfaa
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 654.28s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/f2037ce8-e25d-488b-a839-d69539e55981
+  Run  3: TIMEOUT         Score=   0, HighestLvl= 1, Actions= 500, Dur=21280.76s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/dc2490f2-73dd-4abe-a7be-58b580746a24
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions=  69, Dur=3029.48s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/edeab063-2d35-4d0a-8a1c-e5ed9160a826
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions=  15, Dur= 642.01s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/04052813-a9af-407a-8e1b-fa96106ab5bf
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---

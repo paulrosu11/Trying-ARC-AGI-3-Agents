@@ -1,0 +1,186 @@
+--- Evaluation Summary Report ---
+Agent: as66-memory-general
+Suite: standard_suite
+Requested Runs per Game: 5
+Generated At: 2025-11-03T11:17:03.077968
+---------------------------------
+
+## Overall Summary
+--------------------------------------------------
+Total Runs Attempted: 30
+Total Runs Completed (Full Game Win): 0
+Overall Game Completion Rate: 0.0%
+Average Run Duration (all runs): 16342.22s
+--------------------------------------------------
+
+## Per-Game Summary (Averaged Across Runs)
+
+================================================================================
+Game ID: as66-821a4dcad9c2
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 2.4
+    Avg Highest Level Reached: 3.8
+    Avg Total Actions (Per Run): 270.0
+    Avg Run Duration: 24897.19s
+    Avg Total Game Overs (Per Run): 25.8
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               13.8 |                  7.4 |            0.4 |         13.8 |      100.0% |          5
+      2 |               37.8 |                  8.8 |            2.0 |         34.4 |       80.0% |          5
+      3 |              151.8 |                 18.0 |            5.0 |         88.5 |       50.0% |          4
+      4 |               47.0 |                  6.0 |            1.5 |         32.5 |       50.0% |          2
+      5 |              128.0 |                 42.0 |           81.0 |        124.0 |      100.0% |          1
+      6 |              260.0 |                  8.0 |           13.0 |        216.0 |      100.0% |          1
+      7 |                3.0 |                  N/A |            0.0 |          3.0 |        0.0% |          1
+
+================================================================================
+Game ID: ft09-b8377d4b7815
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.4
+    Avg Highest Level Reached: 1.4
+    Avg Total Actions (Per Run): 321.6
+    Avg Run Duration: 21227.64s
+    Avg Total Game Overs (Per Run): 9.8
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |              240.8 |                 10.0 |            7.8 |        166.0 |       20.0% |          5
+      2 |              217.0 |                  9.0 |            6.0 |        159.0 |      100.0% |          1
+      3 |              187.0 |                  N/A |            4.0 |        185.0 |        0.0% |          1
+
+================================================================================
+Game ID: lp85-d265526edbaa
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.6
+    Avg Highest Level Reached: 1.6
+    Avg Total Actions (Per Run): 156.4
+    Avg Run Duration: 8526.19s
+    Avg Total Game Overs (Per Run): 2.2
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               64.6 |                 30.3 |            2.2 |         35.4 |       60.0% |          5
+      2 |              153.0 |                  N/A |            0.0 |         13.3 |        0.0% |          3
+
+================================================================================
+Game ID: ls20-fa137e247ce6
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.4
+    Avg Highest Level Reached: 1.4
+    Avg Total Actions (Per Run): 187.8
+    Avg Run Duration: 19987.43s
+    Avg Total Game Overs (Per Run): 1.8
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |              148.2 |                 37.0 |            1.6 |        137.2 |       40.0% |          5
+      2 |               99.0 |                  N/A |            0.5 |         69.5 |        0.0% |          2
+
+================================================================================
+Game ID: sp80-0605ab9e5b2a
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 0.0
+    Avg Highest Level Reached: 1.0
+    Avg Total Actions (Per Run): 88.2
+    Avg Run Duration: 5955.04s
+    Avg Total Game Overs (Per Run): 5.2
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |               88.2 |                  N/A |            5.2 |         87.0 |        0.0% |          5
+
+================================================================================
+Game ID: vc33-6ae7bf49eea5
+================================================================================
+  Run Summary:
+    Total Runs: 5
+    Completed Runs (Full Game Win): 0 (0.0%)
+    Avg Final Score (All Runs): 1.4
+    Avg Highest Level Reached: 2.4
+    Avg Total Actions (Per Run): 254.2
+    Avg Run Duration: 17459.85s
+    Avg Total Game Overs (Per Run): 0.6
+
+  Level Statistics (Averaged Across Runs):
+    ----------------------------------------------------------------------------------------------------------
+    Lvl |  Avg Total Actions |  Avg Success Actions |  Avg Total GOs |  Avg State ∆ |   Cmpl Rate |   Attempts
+    ----------------------------------------------------------------------------------------------------------
+      1 |              160.2 |                 75.2 |            0.0 |          2.2 |       80.0% |          5
+      2 |               41.2 |                 27.0 |            0.2 |         10.2 |       75.0% |          4
+      3 |              101.7 |                  N/A |            0.7 |         22.0 |        0.0% |          3
+
+================================================================================
+
+## Detailed Run List & Replay Links
+--------------------------------------------------------------------------------
+
+Game: as66-821a4dcad9c2
+  Run  1: ERROR           Score=   1, HighestLvl= 2, Actions=  40, Dur=4303.07s, GOs=  2 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  2: ERROR           Score=   4, HighestLvl= 7, Actions= 464, Dur=38674.19s, GOs= 98 -> ERROR: Error code: 400 - {'error': {'message': 'Input tokens exceed the...
+  Run  3: ERROR           Score=   3, HighestLvl= 4, Actions= 479, Dur=42478.10s, GOs= 15 -> ERROR: Error code: 400 - {'error': {'message': 'Input tokens exceed the...
+  Run  4: ERROR           Score=   2, HighestLvl= 3, Actions=  47, Dur=4792.09s, GOs=  1 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  5: ERROR           Score=   2, HighestLvl= 3, Actions= 320, Dur=34238.48s, GOs= 13 -> ERROR: Error code: 400 - {'error': {'message': 'Input tokens exceed the...
+
+Game: ft09-b8377d4b7815
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  85, Dur=8153.56s, GOs=  2 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  72, Dur=4766.59s, GOs=  1 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions= 451, Dur=20765.54s, GOs= 14 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  4: TIMEOUT         Score=   0, HighestLvl= 1, Actions= 500, Dur=31062.09s, GOs= 19 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/d5c0459c-b19f-491d-9fa8-b4721cd4363b
+  Run  5: TIMEOUT         Score=   2, HighestLvl= 3, Actions= 500, Dur=41390.42s, GOs= 13 -> https://three.arcprize.org/replay/ft09-b8377d4b7815/e1e4fd52-3a4d-4cb3-b8a0-876eea1947e6
+
+Game: lp85-d265526edbaa
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  78, Dur=4229.92s, GOs=  2 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  2: ERROR           Score=   1, HighestLvl= 2, Actions=  60, Dur=3828.99s, GOs=  0 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  3: ERROR           Score=   1, HighestLvl= 2, Actions= 389, Dur=18990.49s, GOs=  0 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  4: ERROR           Score=   1, HighestLvl= 2, Actions= 101, Dur=7788.97s, GOs=  0 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions= 154, Dur=7792.57s, GOs=  9 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+
+Game: ls20-fa137e247ce6
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions= 256, Dur=26369.72s, GOs=  3 -> ERROR: Error code: 400 - {'error': {'message': 'Input tokens exceed the...
+  Run  2: ERROR           Score=   1, HighestLvl= 2, Actions= 182, Dur=19056.95s, GOs=  1 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions=  73, Dur=7795.46s, GOs=  1 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions= 195, Dur=20784.26s, GOs=  2 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  5: ERROR           Score=   1, HighestLvl= 2, Actions= 233, Dur=25930.75s, GOs=  2 -> ERROR: Error code: 400 - {'error': {'message': 'Input tokens exceed the...
+
+Game: sp80-0605ab9e5b2a
+  Run  1: ERROR           Score=   0, HighestLvl= 1, Actions=  47, Dur=3839.15s, GOs=  0 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  2: ERROR           Score=   0, HighestLvl= 1, Actions=  74, Dur=4846.99s, GOs=  6 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  3: ERROR           Score=   0, HighestLvl= 1, Actions= 107, Dur=8434.96s, GOs=  4 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  4: ERROR           Score=   0, HighestLvl= 1, Actions=  51, Dur=4220.55s, GOs=  0 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  5: ERROR           Score=   0, HighestLvl= 1, Actions= 162, Dur=8433.56s, GOs= 16 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+
+Game: vc33-6ae7bf49eea5
+  Run  1: ERROR           Score=   2, HighestLvl= 3, Actions=  85, Dur=7756.43s, GOs=  1 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  2: ERROR           Score=   2, HighestLvl= 3, Actions=  93, Dur=8403.52s, GOs=  1 -> ERROR: <!DOCTYPE html> <!--[if lt IE 7]> <html class="no-js ie6 oldie"...
+  Run  3: TIMEOUT         Score=   2, HighestLvl= 3, Actions= 500, Dur=31441.70s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/ac0467c2-bf74-4222-9dfe-9403e30cc700
+  Run  4: ERROR           Score=   1, HighestLvl= 2, Actions=  93, Dur=7784.17s, GOs=  1 -> ERROR: Error code: 429 - {'error': {'message': 'Rate limit reached for...
+  Run  5: TIMEOUT         Score=   0, HighestLvl= 1, Actions= 500, Dur=31913.41s, GOs=  0 -> https://three.arcprize.org/replay/vc33-6ae7bf49eea5/a721df29-f599-4214-9c8c-562dc3bcd22b
+--------------------------------------------------------------------------------
+
+--- End of Summary Report ---
