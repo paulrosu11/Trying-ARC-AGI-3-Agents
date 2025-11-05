@@ -1,0 +1,9 @@
+  ERROR: Failed to restore /home/users/par55/venvs/vllm_qwen/bin/pip
+  ERROR: Failed to restore /home/users/par55/venvs/vllm_qwen/bin/pip3
+  ERROR: Failed to restore /home/users/par55/venvs/vllm_qwen/bin/pip3.12
+ERROR: Could not install packages due to an OSError: [Errno 122] Disk quota exceeded: '/home/users/par55/venvs/vllm_qwen/lib/python3.12/site-packages/pip/_internal/metadata/pkg_resources.py'
+
+
+[notice] A new release of pip is available: 25.0.1 -> 25.3
+[notice] To update, run: python3.12 -m pip install --upgrade pip
+/var/lib/slurm/slurmd/job10115645/slurm_script: line 1: VLLM_PID: unbound variable

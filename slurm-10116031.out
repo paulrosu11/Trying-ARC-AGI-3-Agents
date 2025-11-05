@@ -1,0 +1,54 @@
+Waiting for server...
+INFO 11-04 19:00:53 [__init__.py:216] Automatically detected platform cuda.
+[1;36m(APIServer pid=609691)[0;0m INFO 11-04 19:01:09 [api_server.py:1839] vLLM API server version 0.11.0
+[1;36m(APIServer pid=609691)[0;0m INFO 11-04 19:01:09 [utils.py:233] non-default args: {'model_tag': 'Qwen/Qwen3-4B-Instruct-2507', 'port': 8009, 'enable_auto_tool_choice': True, 'tool_call_parser': 'qwen3_xml', 'model': 'Qwen/Qwen3-4B-Instruct-2507'}
+[1;36m(APIServer pid=609691)[0;0m Traceback (most recent call last):
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/bin/vllm", line 7, in <module>
+[1;36m(APIServer pid=609691)[0;0m     sys.exit(main())
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/entrypoints/cli/main.py", line 54, in main
+[1;36m(APIServer pid=609691)[0;0m     args.dispatch_function(args)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/entrypoints/cli/serve.py", line 57, in cmd
+[1;36m(APIServer pid=609691)[0;0m     uvloop.run(run_server(args))
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/uvloop/__init__.py", line 69, in run
+[1;36m(APIServer pid=609691)[0;0m     return loop.run_until_complete(wrapper())
+[1;36m(APIServer pid=609691)[0;0m   File "uvloop/loop.pyx", line 1518, in uvloop.loop.Loop.run_until_complete
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/uvloop/__init__.py", line 48, in wrapper
+[1;36m(APIServer pid=609691)[0;0m     return await main
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/entrypoints/openai/api_server.py", line 1884, in run_server
+[1;36m(APIServer pid=609691)[0;0m     await run_server_worker(listen_address, sock, args, **uvicorn_kwargs)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/entrypoints/openai/api_server.py", line 1902, in run_server_worker
+[1;36m(APIServer pid=609691)[0;0m     async with build_async_engine_client(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/lib/python3.10/contextlib.py", line 199, in __aenter__
+[1;36m(APIServer pid=609691)[0;0m     return await anext(self.gen)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/entrypoints/openai/api_server.py", line 180, in build_async_engine_client
+[1;36m(APIServer pid=609691)[0;0m     async with build_async_engine_client_from_engine_args(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/lib/python3.10/contextlib.py", line 199, in __aenter__
+[1;36m(APIServer pid=609691)[0;0m     return await anext(self.gen)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/entrypoints/openai/api_server.py", line 206, in build_async_engine_client_from_engine_args
+[1;36m(APIServer pid=609691)[0;0m     vllm_config = engine_args.create_engine_config(usage_context=usage_context)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/engine/arg_utils.py", line 1135, in create_engine_config
+[1;36m(APIServer pid=609691)[0;0m     self.speculative_config) = maybe_override_with_speculators(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/vllm/transformers_utils/config.py", line 501, in maybe_override_with_speculators
+[1;36m(APIServer pid=609691)[0;0m     config_dict, _ = PretrainedConfig.get_config_dict(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/transformers/configuration_utils.py", line 662, in get_config_dict
+[1;36m(APIServer pid=609691)[0;0m     config_dict, kwargs = cls._get_config_dict(pretrained_model_name_or_path, **kwargs)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/transformers/configuration_utils.py", line 721, in _get_config_dict
+[1;36m(APIServer pid=609691)[0;0m     resolved_config_file = cached_file(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/transformers/utils/hub.py", line 322, in cached_file
+[1;36m(APIServer pid=609691)[0;0m     file = cached_files(path_or_repo_id=path_or_repo_id, filenames=[filename], **kwargs)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/transformers/utils/hub.py", line 567, in cached_files
+[1;36m(APIServer pid=609691)[0;0m     raise e
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/transformers/utils/hub.py", line 479, in cached_files
+[1;36m(APIServer pid=609691)[0;0m     hf_hub_download(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/huggingface_hub/utils/_validators.py", line 114, in _inner_fn
+[1;36m(APIServer pid=609691)[0;0m     return fn(*args, **kwargs)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1007, in hf_hub_download
+[1;36m(APIServer pid=609691)[0;0m     return _hf_hub_download_to_cache_dir(
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/xtmp/par55/venvs/vllm_qwen/lib/python3.10/site-packages/huggingface_hub/file_download.py", line 1124, in _hf_hub_download_to_cache_dir
+[1;36m(APIServer pid=609691)[0;0m     os.makedirs(os.path.dirname(blob_path), exist_ok=True)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/lib/python3.10/os.py", line 215, in makedirs
+[1;36m(APIServer pid=609691)[0;0m     makedirs(head, exist_ok=exist_ok)
+[1;36m(APIServer pid=609691)[0;0m   File "/usr/lib/python3.10/os.py", line 225, in makedirs
+[1;36m(APIServer pid=609691)[0;0m     mkdir(name, mode)
+[1;36m(APIServer pid=609691)[0;0m OSError: [Errno 122] Disk quota exceeded: '/home/users/par55/.cache/huggingface/hub/models--Qwen--Qwen3-4B-Instruct-2507'
+slurmstepd: error: *** JOB 10116031 ON compsci-cluster-fitz-06 CANCELLED AT 2025-11-04T19:05:47 ***

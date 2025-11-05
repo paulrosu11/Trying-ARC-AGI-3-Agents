@@ -4,7 +4,7 @@ from typing import Any, Optional, Tuple, List
 import json
 import logging
 import base64
-
+import os 
 from openai import OpenAI
 
 from ..llm_agents import GuidedLLM, VisualGuidedLLM

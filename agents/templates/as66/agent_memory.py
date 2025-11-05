@@ -5,7 +5,7 @@ import json
 import logging
 import uuid
 from pathlib import Path
-
+import os
 from openai import OpenAI
 
 from ..llm_agents import GuidedLLM

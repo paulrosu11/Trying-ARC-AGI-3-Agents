@@ -29,3 +29,6 @@ up_full.json
 
 memory/
 
+.venv/
+
+evaluation_results/

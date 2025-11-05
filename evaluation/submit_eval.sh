@@ -53,7 +53,7 @@ uv run evaluation/evaluate.py \
     --agent as66-memory\
     --suite standard_suite \
     --num_runs 5 \
-    --max_workers 15 \
+    --max_workers 30 \
     --max_actions 500
 
 echo "[INFO] Evaluation command finished."
