@@ -22,6 +22,7 @@ from .templates.as66 import (
     AS66ManualScriptVision,
     AS66GuidedAgent64,
     AS66MemoryAgent,
+    AS66VisualMemoryAgent,
     AS66GuidedAgentImageOnly,
     AS66GuidedAgentTextAndImage,
 )
@@ -64,6 +65,8 @@ AVAILABLE_AGENTS.update({
     "as66-guided": AS66GuidedAgent,
     "as66guidedagent64": AS66GuidedAgent64,
     "as66memoryagent": AS66MemoryAgent,
+    "as66visualmemoryagent": AS66VisualMemoryAgent,
+    "as66-visual-memory": AS66VisualMemoryAgent,
     "as66-memory": AS66MemoryAgent,
     "as66-image-only": AS66GuidedAgentImageOnly,
     "as66-text-and-image": AS66GuidedAgentTextAndImage,

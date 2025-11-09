@@ -50,10 +50,10 @@ fi
 export ARCGAME_GENERAL_PROMPTS=1 
 
 uv run evaluation/evaluate.py \
-    --agent as66-memory\
-    --suite standard_suite \
+    --agent as66-visual-memory\
+    --suite debug_suite \
     --num_runs 5 \
-    --max_workers 30 \
-    --max_actions 500
+    --max_workers 5 \
+    --max_actions 250
 
 echo "[INFO] Evaluation command finished."

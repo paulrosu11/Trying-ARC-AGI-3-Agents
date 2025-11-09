@@ -31,11 +31,11 @@ PORT=8009
 vllm serve "$MODEL" \
   --served-model-name "$SERVED" \
   --port $PORT \
-  --tensor-parallel-size 1 \
+  --tensor-parallel-size 2 \
   --enable-auto-tool-choice \
   --tool-call-parser qwen3_xml \
-  --gpu-memory-utilization 0.9 \
-#  --max-model-len 20000 \
+  --gpu-memory-utilization 0.95 \
+ --max-model-len 250000 \
   --dtype auto \
   &
 
