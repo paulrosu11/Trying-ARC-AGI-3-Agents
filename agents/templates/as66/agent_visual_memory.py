@@ -11,7 +11,7 @@ from openai import OpenAI
 
 from ...structs import FrameData, GameAction, GameState, ActionInput
 from .agent_memory import AS66MemoryAgent
-from .downsample import downsample_4x4, ds16_png_bytes
+from .downsample import downsample_4x4, render_grid_to_png_bytes 
 
 # Import the new visual prompt builders
 from .prompts_visual_memory import (
@@ -49,16 +49,35 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         self.game_image_dir = self.IMAGE_DIR / self.game_id
         self.game_image_dir.mkdir(parents=True, exist_ok=True)
         # memory/images/ is covered by memory/ in .gitignore
+        
+        
+        # Note: self.INCLUDE_TEXT_DIFF and self.CONTEXT_LENGTH_LIMIT are
+        # already set by the parent AS66MemoryAgent's __init__
+        self.DOWNSAMPLE = os.getenv("DOWNSAMPLE_IMAGES", "true").lower() == "true"
+        self.IMAGE_DETAIL_LEVEL = os.getenv("IMAGE_DETAIL_LEVEL", "low").lower()
+        self.PIXELS_PER_CELL = int(os.getenv("IMAGE_PIXELS_PER_CELL", "24"))
+
+    def _get_grid_from_frame(self, frame_3d: List[List[List[int]]]) -> List[List[int]]:
+        """Helper to get the correct grid (16x16 or 64x64) based on DOWNSAMPLE setting."""
+        if self.DOWNSAMPLE:
+            return downsample_4x4(frame_3d, take_last_grid=True, round_to_int=True)
+        else:
+            # Use the raw 64x64 grid (assumed to be the last one in the list)
+            return frame_3d[-1] if frame_3d else []
 
     def _generate_and_save_image(self, grid: List[List[int]]) -> Tuple[str, str]:
         """
-        Generates a 16x16 color PNG, saves it, and returns its path and b64 data.
+        Generates a 16x16 or 64x64 color PNG, saves it, and returns its path and b64 data.
 
         Returns:
             (relative_path, b64_data_url)
         """
         try:
-            png_bytes = ds16_png_bytes(grid)
+            
+            png_bytes = render_grid_to_png_bytes(grid, cell=self.PIXELS_PER_CELL)
+            if not png_bytes:
+                raise ValueError("Rendered empty PNG bytes (grid might be empty)")
+                
             b64_data = base64.b64encode(png_bytes).decode('utf-8')
             
             # Create a unique filename for this state
@@ -80,7 +99,8 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         client = OpenAI()
         
         grid_3d = initial_frame.frame
-        grid = downsample_4x4(grid_3d, take_last_grid=True, round_to_int=True) if self.DOWNSAMPLE else (grid_3d[-1] if grid_3d else [])
+        
+        grid = self._get_grid_from_frame(grid_3d)
 
         # Generate the initial image
         img_path, img_b64_url = self._generate_and_save_image(grid)
@@ -93,7 +113,8 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         img_b64 = img_b64_url.split(",", 1)[1] # Get just the data
 
         sys_prompt = build_initial_hypotheses_system_prompt()
-        user_content = build_initial_hypotheses_user_content(self.game_id, img_b64)
+        
+        user_content = build_initial_hypotheses_user_content(self.game_id, img_b64, detail=self.IMAGE_DETAIL_LEVEL)
         
         resp = client.chat.completions.create(
             model=self.MODEL,
@@ -102,7 +123,7 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
                 {"role": "user", "content": user_content}
             ],
             reasoning_effort=self.REASONING_EFFORT,
- 
+
         )
         
         self.hypotheses_content = f"## Hypotheses\n\n{(resp.choices[0].message.content or '').strip()}"
@@ -130,12 +151,13 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         prev_grid_3d = prev_frame.frame
         new_grid_3d = new_frame.frame
         
-        prev_grid = downsample_4x4(prev_grid_3d, take_last_grid=True, round_to_int=True) if self.DOWNSAMPLE else (prev_grid_3d[-1] if prev_grid_3d else [])
-        new_grid = downsample_4x4(new_grid_3d, take_last_grid=True, round_to_int=True) if self.DOWNSAMPLE else (new_grid_3d[-1] if new_grid_3d else [])
+        
+        prev_grid = self._get_grid_from_frame(prev_grid_3d)
+        new_grid = self._get_grid_from_frame(new_grid_3d)
 
         state_hash = self._get_state_hash(prev_grid)
         
-        # --- (Re-using action identifier logic from parent) ---
+        
         action_id_enum = action.id
         action_identifier = action_id_enum.name
         if action_id_enum == GameAction.ACTION6 and action.reasoning and "original_click" in action.reasoning:
@@ -147,7 +169,7 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
             x = action.data.get('x', '?')
             y = action.data.get('y', '?')
             action_identifier = f"{action_id_enum.name}(x={x}, y={y}) [mapped]"
-        # --- (End of re-used logic) ---
+        
 
         state_action_tuple = (state_hash, action_identifier)
 
@@ -166,17 +188,28 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
 
         # Build the text block for the markdown file
         entry_header = f"### Turn {len(self.seen_state_actions)}\n\n"
-        entry_body = (
-            f"**Action:** `{action_identifier}`\n\n"
-            "**State Before (Image):**\n"
-            f"![Before]({prev_img_path})\n\n"
-            "**State After (Image):**\n"
-            f"![After]({new_img_path})\n\n"
-            "**Resulting Textual Diff:**\n"
-            "```\n"
-            f"{diff}\n"
-            "```\n"
-        )
+        
+        
+        entry_parts_list = [
+            f"**Action:** `{action_identifier}`\n\n",
+            "**State Before (Image):**\n",
+            f"![Before]({prev_img_path})\n\n",
+            "**State After (Image):**\n",
+            f"![After]({new_img_path})\n"
+        ]
+        
+        if self.INCLUDE_TEXT_DIFF:
+            entry_parts_list.extend([
+                "\n**Resulting Textual Diff:**\n",
+                "```\n",
+                f"{diff}\n",
+                "```\n"
+            ])
+        else:
+            entry_parts_list.append("\n\n")
+
+        entry_body = "".join(entry_parts_list)
+        
         
         if is_level_up:
             history_entry = f"> **⭐ LEVEL UP! A new level begins below.**\n>\n{'> '.join((entry_header + entry_body).splitlines(True))}\n---\n\n"
@@ -186,39 +219,49 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
             history_entry = f"{entry_header}{entry_body}\n---\n\n"
 
         if "(No moves recorded yet.)" in self.move_history_content or "Initial State" in self.move_history_content:
-            self.move_history_content = "## Move History\n\n" + history_entry
+            # This logic is flawed, let's just append (to do)
+            self.move_history_content += history_entry
         else:
             self.move_history_content += history_entry
             
         # This is the multimodal content for the *last move only*
         # We need the raw b64 data for the API call
-        prev_img_b64 = prev_img_b64_url.split(",", 1)[1]
-        new_img_b64 = new_img_b64_url.split(",", 1)[1]
+        prev_img_b64 = prev_img_b64_url.split(",", 1)[1] if prev_img_b64_url else ""
+        new_img_b64 = new_img_b64_url.split(",", 1)[1] if new_img_b64_url else ""
         
+       
         last_move_block_content = [
             {"type": "text", "text": f"**Action:** `{action_identifier}`\n\n**State Before (Image):**"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_img_b64}", "detail": "low"}},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_img_b64}", "detail": self.IMAGE_DETAIL_LEVEL}},
             {"type": "text", "text": "\n\n**State After (Image):**"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{new_img_b64}", "detail": "low"}},
-            {"type": "text", "text": f"\n\n**Resulting Textual Diff:**\n```\n{diff}\n```\n"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{new_img_b64}", "detail": self.IMAGE_DETAIL_LEVEL}},
         ]
+        
+        if self.INCLUDE_TEXT_DIFF:
+            last_move_block_content.append(
+                {"type": "text", "text": f"\n\n**Resulting Textual Diff:**\n```\n{diff}\n```\n"}
+            )
+        else:
+            last_move_block_content.append({"type": "text", "text": "\n\n"})
+      
+
 
         log.info(f"[{self.game_id}] Updating hypotheses based on new visual move...")
         sys_prompt = build_update_hypotheses_system_prompt()
         
-        # Get the text-only history (markdown with file paths)
+        # Get the text-only history (which may be truncated by parent method)
         text_memory_content = self._read_memory()
         
         user_content = build_update_hypotheses_user_content(text_memory_content, last_move_block_content)
 
         if is_level_up:
-             special_instruction = (
-                 "**IMPORTANT CONTEXT: A LEVEL UP just occurred.** The game board has changed for the new level. "
-                 "Your primary task now is to **re-validate your current hypotheses against this new environment.** "
-                 "Generate a new set of five hypotheses that reflect your understanding of this new level.\n\n"
-             )
-             # Prepend the special instruction
-             user_content.insert(0, {"type": "text", "text": special_instruction})
+            special_instruction = (
+                "**IMPORTANT CONTEXT: A LEVEL UP just occurred.** The game board has changed for the new level. "
+                "Your primary task now is to **re-validate your current hypotheses against this new environment.** "
+                "Generate a new set of five hypotheses that reflect your understanding of this new level.\n\n"
+            )
+            # Prepend the special instruction
+            user_content.insert(0, {"type": "text", "text": special_instruction})
 
 
         resp = client.chat.completions.create(
@@ -256,7 +299,8 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
 
         sys_prompt = build_observation_system_prompt()
         # memory_content already contains the markdown history (with image paths)
-        user_content = build_observation_user_content(memory_content, current_img_b64, score, step)
+       
+        user_content = build_observation_user_content(memory_content, current_img_b64, score, step, detail=self.IMAGE_DETAIL_LEVEL)
 
         resp = client.chat.completions.create(
             model=self.MODEL,
@@ -265,7 +309,7 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
                 {"role": "user", "content": user_content}
             ],
             reasoning_effort=self.REASONING_EFFORT,
-      
+        
         )
         self._token_total += getattr(resp.usage, "total_tokens", 0)
         
@@ -293,7 +337,8 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
 
         memory_content = self._read_memory()
         grid_3d = latest_frame.frame
-        grid = downsample_4x4(grid_3d, take_last_grid=True, round_to_int=True) if self.DOWNSAMPLE else (grid_3d[-1] if grid_3d else [])
+        
+        grid = self._get_grid_from_frame(grid_3d)
 
         # Call our new multimodal observation function
         observation_text = self._get_observation_text(memory_content, grid, latest_frame.score, len(frames))

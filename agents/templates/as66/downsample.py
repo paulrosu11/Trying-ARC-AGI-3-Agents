@@ -77,7 +77,7 @@ def matrix16_to_lines(mat: List[List[int]]) -> str:
     return "\n".join(" ".join(str(v) for v in row) for row in mat)
 
 
-# ---- tiny 16×16 visualization for vision/inspection (never used in text prompts) ----
+#tiny 16×16 visualization for vision/inspection (never used in text prompts) 
 
 KEY_COLORS = {
     0: "#FFFFFF", 1: "#CCCCCC", 2: "#999999",
@@ -94,16 +94,30 @@ def _hex_to_rgb(h: str) -> tuple[int, int, int]:
         return (136, 136, 136)
     return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
-def ds16_png_bytes(ds16: List[List[int]], cell: int = 22) -> bytes:
-    h = len(ds16) or 16
-    w = len(ds16[0]) if ds16 and ds16[0] else 16
+def render_grid_to_png_bytes(grid: List[List[int]], cell: int = 22) -> bytes:
+    """
+    Generates a color PNG from a grid (e.g., 16x16 or 64x64).
+    
+    Args:
+        grid: The 2D integer grid.
+        cell: The pixel size (width and height) for each grid cell.
+    """
+    h = len(grid)
+    w = len(grid[0]) if h > 0 else 0
+    if h == 0 or w == 0:
+        # Return a 1x1 black pixel as a fallback
+        im = Image.new("RGB", (1, 1), (0, 0, 0))
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True)
+        return buf.getvalue()
+
     H, W = h * cell, w * cell
     im = Image.new("RGB", (W, H), (0, 0, 0))
     px = im.load()
     for y in range(h):
-        row = ds16[y] if y < len(ds16) else [0] * w
+        row = grid[y]
         for x in range(w):
-            code = row[x] if x < len(row) else 0
+            code = row[x]
             rgb = _hex_to_rgb(KEY_COLORS.get(int(code) & 15, "#888888"))
             for dy in range(cell):
                 for dx in range(cell):
@@ -112,7 +126,6 @@ def ds16_png_bytes(ds16: List[List[int]], cell: int = 22) -> bytes:
     im.save(buf, "PNG", optimize=True)
     return buf.getvalue()
 
-# --- New function for "screenshot" of numeric grid ---
 
 def generate_numeric_grid_image_bytes(grid: List[List[int]]) -> bytes:
     """

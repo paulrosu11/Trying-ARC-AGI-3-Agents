@@ -5,7 +5,7 @@ agent. It prepends a new system prompt header that defines the color mapping
 and the new multimodal context format (images + text diffs).
 """
 from __future__ import annotations
-from typing import List
+from typing import List, Optional
 
 # Import the original text-based prompt builders
 from .prompts_memory import (
@@ -69,7 +69,7 @@ def build_initial_hypotheses_system_prompt() -> str:
     """System prompt for generating the first set of hypotheses."""
     return COLOR_MAPPING_HEADER + original_initial_system()
 
-def build_initial_hypotheses_user_content(game_id: str, initial_image_b64: str) -> List[dict]:
+def build_initial_hypotheses_user_content(game_id: str, initial_image_b64: str, detail: str = "low") -> List[dict]:
     """User prompt for the first hypotheses, now with an image."""
     return [
         {
@@ -80,7 +80,7 @@ def build_initial_hypotheses_user_content(game_id: str, initial_image_b64: str) 
             "type": "image_url",
             "image_url": {
                 "url": f"data:image/png;base64,{initial_image_b64}",
-                "detail": "low"
+                "detail": detail 
             }
         }
     ]
@@ -109,6 +109,7 @@ def build_update_hypotheses_user_content(memory_content: str, last_move_block: L
         }
     ]
     # Add the [Action text, Before Image, After Image, Diff text]
+    # Note: The 'detail' level is already set in last_move_block by the agent
     content.extend(last_move_block)
     content.append(
         {
@@ -124,7 +125,7 @@ def build_observation_system_prompt() -> str:
     """System prompt for the observation step."""
     return COLOR_MAPPING_HEADER + original_observation_system()
 
-def build_observation_user_content(memory_content: str, current_image_b64: str, score: int, step: int) -> List[dict]:
+def build_observation_user_content(memory_content: str, current_image_b64: str, score: int, step: int, detail: str = "low") -> List[dict]:
     """User prompt for the observation step, with image."""
     return [
         {
@@ -140,7 +141,7 @@ def build_observation_user_content(memory_content: str, current_image_b64: str, 
             "type": "image_url",
             "image_url": {
                 "url": f"data:image/png;base64,{current_image_b64}",
-                "detail": "low"
+                "detail": detail 
             }
         },
         {

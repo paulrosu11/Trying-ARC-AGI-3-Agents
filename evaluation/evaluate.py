@@ -1,5 +1,5 @@
 import argparse
-import logging  # <-- ADDED THIS LINE
+import logging 
 import os
 import sys
 import time
@@ -40,22 +40,58 @@ log = logging.getLogger(__name__)
 ROOT_URL = os.environ.get("ROOT_URL", "https://three.arcprize.org")
 
 # --- Agent Variant Helper ---
-def get_agent_variant_tag(agent_name: str) -> str:
+def _get_agent_tags(agent_name: str) -> List[str]:
     """
     Checks for known environment variables that create agent "variants"
-    and returns a tag for the filename.
+    and returns a list of tags.
     """
+    tags = []
+
+    #
     if agent_name.startswith("as66"):
         # Check for the general prompts env var you mentioned
         if os.getenv("ARCGAME_GENERAL_PROMPTS", "0").strip().lower() in ("1", "true", "yes", "on"):
-            return "general"
+            tags.append("general")
     
-    # Add other checks for other agents here
-    # e.g., if agent_name == "my_other_agent":
-    #           if os.getenv("SOME_OTHER_FLAG"):
-    #               return "variant-x"
+    
+    
+    # Model/Reasoning
+    model_override = os.getenv("AGENT_MODEL_OVERRIDE")
+    if model_override:
+        # Sanitize model name for filename
+        sanitized_model = model_override.split('/')[-1].replace('.', '_')
+        tags.append(sanitized_model)
+        
+    reasoning_effort = os.getenv("AGENT_REASONING_EFFORT")
+    if reasoning_effort:
+        tags.append(f"reason-{reasoning_effort}")
 
-    return "" # Default: no variant
+    # Text Diff
+    include_text_diff = os.getenv("INCLUDE_TEXT_DIFF", "true").lower() == "true"
+    if not include_text_diff:
+        tags.append("noDiff")
+
+    # Context Limit
+    context_limit = int(os.getenv("CONTEXT_LENGTH_LIMIT", "-1"))
+    if context_limit != -1:
+        tags.append(f"ctx{context_limit // 1000}k")
+
+    # Downsample
+    downsample_images = os.getenv("DOWNSAMPLE_IMAGES", "true").lower() == "true"
+    if not downsample_images and "as66visualmemoryagent" in agent_name:
+        tags.append("64x64")
+
+    # Image Detail
+    image_detail = os.getenv("IMAGE_DETAIL_LEVEL", "low").lower()
+    if image_detail != "low" and "as66visualmemoryagent" in agent_name:
+        tags.append(f"detail-{image_detail}")
+
+    # Pixels Per Cell
+    pixels_per_cell = int(os.getenv("IMAGE_PIXELS_PER_CELL", "24"))
+    if pixels_per_cell != 24 and "as66visualmemoryagent" in agent_name:
+        tags.append(f"cell{pixels_per_cell}")
+
+    return tags
 
 # --- Retry Helper ---
 MAX_RETRIES = 5
@@ -158,7 +194,7 @@ def evaluate_single_game(
             level_completed = (latest_frame.score > previous_frame.score and 
                                latest_frame.state != GameState.WIN and 
                                latest_frame.state != GameState.GAME_OVER)
-                               
+                                
             if level_completed:
                 attempt_end_time = time.time()
                 current_attempt_metrics.duration_seconds = attempt_end_time - attempt_start_time
@@ -222,9 +258,9 @@ def evaluate_single_game(
                 log.info(f"[{game_id} Run {run_index}] Game COMPLETED successfully! Final Level {current_level_number} actions: {current_attempt_metrics.actions}. Final Score: {latest_frame.score}")
                 break # Exit loop on win
 
-        # --- Handle Timeout Condition (Loop Exited Normally) ---
-        else: 
-            loop_exited_normally = True # Set flag
+            # --- Handle Timeout Condition (Loop Exited Normally) ---
+            else: 
+                loop_exited_normally = True # Set flag
 
     # --- Handle Errors ---
     except Exception as e:
@@ -264,7 +300,7 @@ def evaluate_single_game(
         
         # Append the last attempt if it hasn't been appended yet
         if not current_level_metrics.attempts or current_level_metrics.attempts[-1].attempt_number != current_attempt_metrics.attempt_number:
-             current_level_metrics.attempts.append(current_attempt_metrics)
+            current_level_metrics.attempts.append(current_attempt_metrics)
         
         # Finalize the last level's status
         if current_level_metrics.status == "IN_PROGRESS":
@@ -272,11 +308,11 @@ def evaluate_single_game(
 
         # Store the last level's metrics
         if current_level_number not in run_metrics.level_metrics:
-             run_metrics.level_metrics[current_level_number] = current_level_metrics
+            run_metrics.level_metrics[current_level_number] = current_level_metrics
 
         # Set the final run status (if it's still IN_PROGRESS, set it to the final attempt status)
         if run_metrics.status == "IN_PROGRESS":
-             run_metrics.status = final_attempt_status
+            run_metrics.status = final_attempt_status
         # --- End of FIX ---
 
         # Aggregate totals from the new LevelMetrics properties
@@ -291,12 +327,12 @@ def evaluate_single_game(
         # This can happen if an error occurs *during* the final action, where total_actions_this_run is 20
         # but the final attempt's action count is still 19. We trust the loop counter.
         if run_metrics.run_total_actions != total_actions_this_run and run_metrics.status != "ERROR":
-             log.warning(f"[{game_id} Run {run_index}] Mismatch! Loop counter `total_actions_this_run` is {total_actions_this_run}, but summed `run_total_actions` is {run_metrics.run_total_actions}. Using loop counter.")
-             # Correct the metric to reflect the max_actions timeout
-             run_metrics.run_total_actions = total_actions_this_run
+            log.warning(f"[{game_id} Run {run_index}] Mismatch! Loop counter `total_actions_this_run` is {total_actions_this_run}, but summed `run_total_actions` is {run_metrics.run_total_actions}. Using loop counter.")
+            # Correct the metric to reflect the max_actions timeout
+            run_metrics.run_total_actions = total_actions_this_run
         elif run_metrics.status == "ERROR":
-             # If an error happened, the loop counter is the source of truth
-             run_metrics.run_total_actions = total_actions_this_run
+            # If an error happened, the loop counter is the source of truth
+            run_metrics.run_total_actions = total_actions_this_run
 
 
         run_metrics.final_score = max_score
@@ -312,7 +348,7 @@ def evaluate_single_game(
         
         # Call cleanup on the agent
         agent.cleanup() 
- 
+    
 
     return run_metrics
 
@@ -325,21 +361,27 @@ def run_evaluation_task(
     agent_name_cli: str, 
     card_id: str, 
     cookies: RequestsCookieJar, 
-    max_actions: int
+    max_actions: int,
+   
+    agent_name_with_variant: str,
+    env_vars_to_set: Dict[str, str]
 ) -> GameMetrics:
     """Creates an agent and runs evaluate_single_game for one task."""
     
     log.debug(f"Task starting: Game {game_id}, Run {run_index}")
     
-    # --- FIX: Pass the *full* agent name with variant to the agent instance ---
-    # This allows the agent itself to know its variant if needed
-    agent_variant_tag = get_agent_variant_tag(agent_name_cli)
-    agent_name_full = f"{agent_name_cli}-{agent_variant_tag}" if agent_variant_tag else agent_name_cli
+    # Set environment variables for this thread/task 
+    # This ensures the agent's __init__ method reads the correct settings
+    for k, v in env_vars_to_set.items():
+        if v is not None:
+            os.environ[k] = v
+        elif k in os.environ:
+            del os.environ[k] # Unset if default was None
     
     agent_instance = agent_class(
         card_id=card_id,
         game_id=game_id,
-        agent_name=agent_name_full, # Pass the full name
+        agent_name=agent_name_with_variant, # Pass the full name with all tags
         ROOT_URL=ROOT_URL,
         record=False, 
         cookies=deepcopy(cookies) 
@@ -386,12 +428,21 @@ def main():
     results_dir.mkdir(exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") 
     
-    # Get variant tag
-    agent_variant_tag = get_agent_variant_tag(agent_name_cli)
-    if agent_variant_tag:
-        agent_name_with_variant = f"{agent_name_cli}-{agent_variant_tag}"
-    else:
-        agent_name_with_variant = agent_name_cli
+    #  Get all tags for filename AND for passing to threads 
+    agent_tags = [agent_name_cli] + _get_agent_tags(agent_name_cli)
+    agent_name_with_variant = "-".join(agent_tags)
+    
+    #  Prepare dict of env vars to pass to tasks 
+    env_vars_to_set = {
+        "AGENT_MODEL_OVERRIDE": os.getenv("AGENT_MODEL_OVERRIDE"),
+        "AGENT_REASONING_EFFORT": os.getenv("AGENT_REASONING_EFFORT"),
+        "INCLUDE_TEXT_DIFF": os.getenv("INCLUDE_TEXT_DIFF", "true"),
+        "CONTEXT_LENGTH_LIMIT": os.getenv("CONTEXT_LENGTH_LIMIT", "-1"),
+        "DOWNSAMPLE_IMAGES": os.getenv("DOWNSAMPLE_IMAGES", "true"),
+        "IMAGE_DETAIL_LEVEL": os.getenv("IMAGE_DETAIL_LEVEL", "low"),
+        "IMAGE_PIXELS_PER_CELL": os.getenv("IMAGE_PIXELS_PER_CELL", "24"),
+        "ARCGAME_GENERAL_PROMPTS": os.getenv("ARCGAME_GENERAL_PROMPTS", "0"),
+    }
     
     # Build comprehensive filename
     base_filename = f"{agent_name_with_variant}_{args.suite}_runs{num_runs}_max{args.max_actions}_{timestamp}"
@@ -409,6 +460,7 @@ def main():
         # Open Scorecard
         with requests.Session() as s:
             s.headers.update(headers)
+            # Use the full agent name with variants as the primary tag
             tags = [f"eval-{agent_name_with_variant}", args.suite, f"runs-{num_runs}", f"workers-{max_workers}", f"max_actions-{args.max_actions}"]
             log.info(f"Attempting to open scorecard with URL: {ROOT_URL}/api/scorecard/open")
             r = s.post(f"{ROOT_URL}/api/scorecard/open", json={"tags": tags}, timeout=30)
@@ -442,7 +494,15 @@ def main():
             future_to_task = {
                 executor.submit(
                     run_evaluation_task,
-                    game_id, run_index, agent_class, agent_name_cli, card_id, cookies, args.max_actions
+                    game_id, 
+                    run_index, 
+                    agent_class, 
+                    agent_name_cli, # Pass the base name
+                    card_id, 
+                    cookies, 
+                    args.max_actions,
+                    agent_name_with_variant, # Pass the full name
+                    env_vars_to_set          # Pass the env var dict
                 ): (game_id, run_index)
                 for game_id, run_index in tasks_to_run
             }
@@ -575,4 +635,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

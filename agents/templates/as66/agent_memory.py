@@ -33,7 +33,7 @@ class AS66MemoryAgent(GuidedLLM):
     """
     MAX_ACTIONS = 200
     MODEL = os.getenv("AGENT_MODEL_OVERRIDE", "gpt-5")
-    REASONING_EFFORT = "low"
+    REASONING_EFFORT = os.getenv("AGENT_REASONING_EFFORT", "low") 
     DOWNSAMPLE = True
     MEMORY_DIR = Path("memory")
 
@@ -46,11 +46,74 @@ class AS66MemoryAgent(GuidedLLM):
         self.hypotheses_content = "## Hypotheses\n\n(No hypotheses generated yet.)"
         self._is_initialized = False
         self._token_total = 0
+        
+        # --- NEW: Ablation settings from environment ---
+        self.INCLUDE_TEXT_DIFF = os.getenv("INCLUDE_TEXT_DIFF", "true").lower() == "true"
+        self.CONTEXT_LENGTH_LIMIT = int(os.getenv("CONTEXT_LENGTH_LIMIT", "-1")) # -1 for unlimited
+
+    def _get_token_count(self, text: str) -> int:
+        """A lightweight proxy for token counting."""
+        # Using a simple 4 chars/token proxy as discussed
+        return len(text) // 4
+
+    def _get_truncated_history(self) -> str:
+        """
+        Applies context length limit with a sliding window that
+        preserves high-information (level up / game over) entries.
+        """
+        if self.CONTEXT_LENGTH_LIMIT == -1:
+            return self.move_history_content # No limit
+            
+        # Split history into header and entries
+        try:
+            header, all_entries_str = self.move_history_content.split("\n\n", 1)
+            entries = all_entries_str.split("\n---\n\n")
+        except ValueError:
+            # Not enough content to split, just return as-is
+            return self.move_history_content
+
+        high_info_entries = []
+        regular_entries = []
+        
+        for i, entry in enumerate(entries):
+            # Store with original index to re-sort later
+            if "⭐ LEVEL UP!" in entry or "☠️ GAME OVER!" in entry:
+                high_info_entries.append((i, entry, self._get_token_count(entry)))
+            else:
+                regular_entries.append((i, entry, self._get_token_count(entry)))
+
+        high_info_tokens = sum(tokens for _, _, tokens in high_info_entries)
+        remaining_budget = self.CONTEXT_LENGTH_LIMIT - high_info_tokens
+
+        kept_entries = [(i, entry) for i, entry, _ in high_info_entries]
+        
+        if remaining_budget > 0:
+            # Fill remaining budget with most recent regular entries
+            kept_regular_tokens = 0
+            # Iterate in reverse (most recent first)
+            for i, entry, tokens in reversed(regular_entries):
+                if (kept_regular_tokens + tokens) <= remaining_budget:
+                    kept_entries.append((i, entry))
+                    kept_regular_tokens += tokens
+                else:
+                    # Budget is full
+                    break
+        
+        # Re-sort all kept entries by their original index to maintain timeline order
+        kept_entries.sort(key=lambda x: x[0])
+        
+        # Re-assemble the history content
+        final_entries_str = "\n---\n\n".join([entry for _, entry in kept_entries])
+        return f"{header}\n\n{final_entries_str}"
+
 
     def _read_memory(self) -> str:
-        return f"{self.move_history_content}\n\n{self.hypotheses_content}"
+        
+        move_history = self._get_truncated_history()
+        return f"{move_history}\n\n{self.hypotheses_content}"
 
     def _write_memory(self) -> None:
+       
         content = self._read_memory()
         self.memory_file_path.write_text(content, encoding="utf-8")
 
@@ -135,21 +198,32 @@ class AS66MemoryAgent(GuidedLLM):
         diff = self._calculate_diff(prev_grid, new_grid)
         
         entry_header = f"### Turn {len(self.seen_state_actions)}\n\n"
-        entry_body = (
-            f"**Action:** `{action_identifier}`\n\n"
-            "**State Before:**\n"
+        
+       
+        entry_parts_list = [
+            f"**Action:** `{action_identifier}`\n\n",
+            "**State Before:**\n",
+            "```\n",
+            f"{matrix16_to_lines(prev_grid)}\n",
+            "```\n\n",
+            "**Resulting State:**\n",
+            "```\n",
+            f"{matrix16_to_lines(new_grid)}\n",
             "```\n"
-            f"{matrix16_to_lines(prev_grid)}\n"
-            "```\n\n"
-            "**Resulting State:**\n"
-            "```\n"
-            f"{matrix16_to_lines(new_grid)}\n"
-            "```\n\n"
-            "**Resulting Diff:**\n"
-            "```\n"
-            f"{diff}\n"
-            "```\n"
-        )
+        ]
+        
+        if self.INCLUDE_TEXT_DIFF:
+            entry_parts_list.extend([
+                "\n**Resulting Diff:**\n",
+                "```\n",
+                f"{diff}\n",
+                "```\n"
+            ])
+        else:
+            entry_parts_list.append("\n") # Add a trailing newline if no diff
+
+        entry_body = "".join(entry_parts_list)
+      
         
         if is_level_up:
             history_entry = f"> **⭐ LEVEL UP! A new level begins below.**\n>\n{'> '.join((entry_header + entry_body).splitlines(True))}\n---\n\n"
@@ -165,6 +239,7 @@ class AS66MemoryAgent(GuidedLLM):
 
         log.info(f"[{self.game_id}] Updating hypotheses based on new move...")
         sys_prompt = build_update_hypotheses_system_prompt()
+        
         user_prompt = build_update_hypotheses_user_prompt(self._read_memory())
 
         if is_level_up:
