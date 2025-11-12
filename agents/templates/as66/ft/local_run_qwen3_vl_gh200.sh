@@ -38,9 +38,9 @@ vllm serve "$MODEL" \
   --port "$PORT" \
   --tensor-parallel-size 1 \
   --gpu-memory-utilization 0.95 \
-  --max-model-len 50000 \
+  --max-model-len 60000 \
   --enable-chunked-prefill \
-  --max-num-batched-tokens 65536 \
+  --max-num-batched-tokens 262144 \
   --max-num-seqs 30 \
   --enable-prefix-caching \
   --dtype auto \
@@ -73,9 +73,9 @@ export AGENT_MODEL_OVERRIDE="$SERVED"
 export AGENT_REASONING_EFFORT="low"
 export INCLUDE_TEXT_DIFF="false"
 export CONTEXT_LENGTH_LIMIT="50000"
-export DOWNSAMPLE_IMAGES="false"
-export IMAGE_DETAIL_LEVEL="high"
-export IMAGE_PIXELS_PER_CELL="4"
+export DOWNSAMPLE_IMAGES="true"
+export IMAGE_DETAIL_LEVEL="low"
+export IMAGE_PIXELS_PER_CELL="16"
 
 echo "[INFO] Env configured:"
 echo "  OPENAI_BASE_URL=$OPENAI_BASE_URL"
@@ -88,7 +88,7 @@ echo "  IMAGE_DETAIL_LEVEL=$IMAGE_DETAIL_LEVEL"
 echo "  IMAGE_PIXELS_PER_CELL=$IMAGE_PIXELS_PER_CELL"
 
 echo "[INFO] Starting evaluation (console output follows)…"
-# Use python (venv) by default; switch to `uv run` if you prefer.
+
 python evaluation/evaluate.py \
   --agent as66visualmemoryagent \
   --suite standard_suite \
