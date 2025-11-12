@@ -31,7 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "[INFO] Launching vLLM server on GH200 for $MODEL …"
+echo "[INFO] Launching vLLM server for $MODEL …"
 
 vllm serve "$MODEL" \
   --served-model-name "$SERVED" \
@@ -45,7 +45,7 @@ vllm serve "$MODEL" \
   --enable-prefix-caching \
   --enable-auto-tool-choice \
   --dtype auto \
-  --image-input-type pixel_values \
+# --image-input-type pixel_values \
   --disable-log-stats \
   --reasoning-parser qwen3 \
   --host 0.0.0.0 \
