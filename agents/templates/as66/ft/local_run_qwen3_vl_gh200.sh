@@ -43,13 +43,13 @@ vllm serve "$MODEL" \
   --max-num-batched-tokens 65536 \
   --max-num-seqs 30 \
   --enable-prefix-caching \
-  --enable-auto-tool-choice \
   --dtype auto \
-# --image-input-type pixel_values \
   --disable-log-stats \
-  --reasoning-parser qwen3 \
   --host 0.0.0.0 \
-  --trust-remote-code &
+  --trust-remote-code \
+  --enable-auto-tool-choice \
+  --tool-call-parser hermes \
+  --reasoning-parser deepseek_r1 &
 
 VLLM_PID=$!
 echo "[INFO] vLLM PID: $VLLM_PID"
