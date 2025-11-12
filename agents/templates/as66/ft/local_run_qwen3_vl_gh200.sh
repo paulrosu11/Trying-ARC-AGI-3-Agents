@@ -41,7 +41,7 @@ vllm serve "$MODEL" \
   --max-model-len 60000 \
   --enable-chunked-prefill \
   --max-num-batched-tokens 262144 \
-  --max-num-seqs 30 \
+  --max-num-seqs 5 \
   --enable-prefix-caching \
   --dtype auto \
   --disable-log-stats \
@@ -91,9 +91,9 @@ echo "[INFO] Starting evaluation (console output follows)…"
 
 python evaluation/evaluate.py \
   --agent as66visualmemoryagent \
-  --suite standard_suite \
+  --suite debug_suite \
   --num_runs 5 \
-  --max_workers 30 \
+  --max_workers 5 \
   --max_actions 300
 
 echo "[INFO] Evaluation finished."
