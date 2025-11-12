@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=eval-vis-yesDiff-ctx200k-16px-300actions
+#SBATCH --job-name=eval-GWEN-VL-low-noDiff-noDS-px4-ctx50k-highDetail
 #SBATCH --partition=compsci-gpu         
 #SBATCH --cpus-per-task=16          
 #SBATCH --mem=64G                    
 #SBATCH --time=24:00:00              
-#SBATCH --output=/usr/xtmp/%u/slurm_logs/%x-%j.out  # Use Slurm %u for username in output path
-#SBATCH --error=/usr/xtmp/%u/slurm_logs/%x-%j.err   # Use Slurm %u for username in error path
+#SBATCH --output=/usr/xtmp/%u/slurm_logs/%x-%j.out
+#SBATCH --error=/usr/xtmp/%u/slurm_logs/%x-%j.err
 
 set -euo pipefail # Exit on error, undefined variable, or pipe failure
 
@@ -20,8 +20,8 @@ else
   _SCRIPT_PATH="${BASH_SOURCE[0]}"
   [[ "$_SCRIPT_PATH" != /* ]] && _SCRIPT_PATH="$(readlink -f "$PWD/$_SCRIPT_PATH")"
   _SCRIPT_DIR="$(dirname "$_SCRIPT_PATH")"
-  # Assuming the script is directly in the project root or similar location
-  REPO_ROOT="$(readlink -f "$_SCRIPT_DIR")"
+  # Assuming the script is in /evaluation/
+  REPO_ROOT="$(readlink -f "$_SCRIPT_DIR/..")"
   # Fallback if run from elsewhere using SLURM_SUBMIT_DIR
   if [[ ! -f "$REPO_ROOT/pyproject.toml" && -n "${SLURM_SUBMIT_DIR:-}" ]]; then
     REPO_ROOT="$(readlink -f "$SLURM_SUBMIT_DIR")"
@@ -41,16 +41,24 @@ else
 fi
 
 
-echo "[INFO] Setting Environment Variables..."
-export AGENT_MODEL_OVERRIDE="gpt-5"
+echo "[INFO] Setting Environment Variables for Ablation..."
+
+# Assumes your server (from Script 1) is running on localhost:8009
+export OPENAI_BASE_URL="http://localhost:8009/v1" 
+export OPENAI_API_KEY="EMPTY"
+export AGENT_MODEL_OVERRIDE="qwen3-vl-4b-thinking" # "gpt-5"
+
+
+# These variables will be read by the as66visualmemoryagent
 export AGENT_REASONING_EFFORT="low"
-export INCLUDE_TEXT_DIFF="true"
-export CONTEXT_LENGTH_LIMIT="200000"
-export DOWNSAMPLE_IMAGES="true"
-export IMAGE_DETAIL_LEVEL="low"
-export IMAGE_PIXELS_PER_CELL="16"
+export INCLUDE_TEXT_DIFF="false"
+export CONTEXT_LENGTH_LIMIT="50000"
+export DOWNSAMPLE_IMAGES="false"
+export IMAGE_DETAIL_LEVEL="high"
+export IMAGE_PIXELS_PER_CELL="4"
 
 
+echo "  OPENAI_BASE_URL=$OPENAI_BASE_URL"
 echo "  AGENT_MODEL_OVERRIDE=$AGENT_MODEL_OVERRIDE"
 echo "  AGENT_REASONING_EFFORT=$AGENT_REASONING_EFFORT"
 echo "  INCLUDE_TEXT_DIFF=$INCLUDE_TEXT_DIFF"
