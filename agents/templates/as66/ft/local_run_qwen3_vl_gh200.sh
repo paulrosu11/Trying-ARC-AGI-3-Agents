@@ -37,7 +37,7 @@ vllm serve "$MODEL" \
   --served-model-name "$SERVED" \
   --port "$PORT" \
   --tensor-parallel-size 1 \
-  --gpu-memory-utilization 0.95 \
+  --gpu-memory-utilization 0.90 \
   --max-model-len 60000 \
   --enable-chunked-prefill \
   --max-num-batched-tokens 262144 \
@@ -49,6 +49,7 @@ vllm serve "$MODEL" \
   --trust-remote-code \
   --enable-auto-tool-choice \
   --tool-call-parser hermes \
+  --limit-mm-per-prompt "image=1024" \
   --reasoning-parser deepseek_r1 &
 
 VLLM_PID=$!
