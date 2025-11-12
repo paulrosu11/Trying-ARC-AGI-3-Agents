@@ -49,7 +49,7 @@ vllm serve "$MODEL" \
   --trust-remote-code \
   --enable-auto-tool-choice \
   --tool-call-parser hermes \
-  --limit-mm-per-prompt "image=1024" \
+  --limit-mm-per-prompt '{"image": 1024}' \
   --reasoning-parser deepseek_r1 &
 
 VLLM_PID=$!
