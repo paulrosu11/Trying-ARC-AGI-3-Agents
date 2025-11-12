@@ -13,46 +13,60 @@ from ...structs import FrameData, GameAction, GameState, ActionInput
 from .agent_memory import AS66MemoryAgent
 from .downsample import downsample_4x4, render_grid_to_png_bytes 
 
-# Import the new visual prompt builders
+# Import the visual prompt builders
 from .prompts_visual_memory import (
     build_initial_hypotheses_system_prompt,
     build_initial_hypotheses_user_content,
     build_update_hypotheses_system_prompt,
-    build_update_hypotheses_user_content,
     build_observation_system_prompt,
-    build_observation_user_content,
     build_action_selection_system_prompt,
     build_action_selection_user_prompt,
 )
 
 log = logging.getLogger(__name__)
 
+
+class TurnData:
+    """Stores complete data for a single turn to enable image regeneration."""
+    def __init__(
+        self, 
+        turn_number: int,
+        action_str: str,
+        before_grid: List[List[int]],
+        after_grid: List[List[int]],
+        diff_str: str,
+        is_level_up: bool = False,
+        is_game_over: bool = False
+    ):
+        self.turn_number = turn_number
+        self.action_str = action_str
+        self.before_grid = before_grid
+        self.after_grid = after_grid
+        self.diff_str = diff_str
+        self.is_level_up = is_level_up
+        self.is_game_over = is_game_over
+
+
 class AS66VisualMemoryAgent(AS66MemoryAgent):
     """
     An agent that uses multimodal context (images + text diffs) to manage
-    hypotheses, mirroring the AS66MemoryAgent's three-call structure.
-
-    Overrides:
-    - `_initialize_memory`: Uses multimodal prompt (text+image)
-    - `_update_memory`: Generates/saves images, updates memory file with image
-      paths, and calls hypothesis update with multimodal context.
-    - `_get_observation_text`: Renamed to `_get_observation_content` and
-      made multimodal.
-    - `choose_action`: Orchestrates the new multimodal calls.
+    hypotheses. Properly implements interleaved image+text history that scales
+    with the number of turns.
     """
-    MODEL = os.getenv("AGENT_MODEL_OVERRIDE", "gpt-5") # Requires a vision model
+    MODEL = os.getenv("AGENT_MODEL_OVERRIDE", "gpt-5")  # Requires a vision model
     IMAGE_DIR = Path("memory") / "images"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        
         # Ensure the per-game image directory exists
         self.game_image_dir = self.IMAGE_DIR / self.game_id
         self.game_image_dir.mkdir(parents=True, exist_ok=True)
-        # memory/images/ is covered by memory/ in .gitignore
         
+        # Store structured turn data for regenerating images
+        self.turn_history: List[TurnData] = []
         
-        # Note: self.INCLUDE_TEXT_DIFF and self.CONTEXT_LENGTH_LIMIT are
-        # already set by the parent AS66MemoryAgent's __init__
+        # Vision-specific settings
         self.DOWNSAMPLE = os.getenv("DOWNSAMPLE_IMAGES", "true").lower() == "true"
         self.IMAGE_DETAIL_LEVEL = os.getenv("IMAGE_DETAIL_LEVEL", "low").lower()
         self.PIXELS_PER_CELL = int(os.getenv("IMAGE_PIXELS_PER_CELL", "24"))
@@ -62,36 +76,132 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         if self.DOWNSAMPLE:
             return downsample_4x4(frame_3d, take_last_grid=True, round_to_int=True)
         else:
-            # Use the raw 64x64 grid (assumed to be the last one in the list)
             return frame_3d[-1] if frame_3d else []
 
-    def _generate_and_save_image(self, grid: List[List[int]]) -> Tuple[str, str]:
-        """
-        Generates a 16x16 or 64x64 color PNG, saves it, and returns its path and b64 data.
-
-        Returns:
-            (relative_path, b64_data_url)
-        """
+    def _grid_to_base64(self, grid: List[List[int]]) -> str:
+        """Convert a grid to base64 PNG data (without the data URL prefix)."""
         try:
-            
             png_bytes = render_grid_to_png_bytes(grid, cell=self.PIXELS_PER_CELL)
             if not png_bytes:
-                raise ValueError("Rendered empty PNG bytes (grid might be empty)")
-                
-            b64_data = base64.b64encode(png_bytes).decode('utf-8')
-            
-            # Create a unique filename for this state
-            img_filename = f"{uuid.uuid4()}.png"
-            relative_path = Path("images") / self.game_id / img_filename
-            full_path = self.IMAGE_DIR / self.game_id / img_filename
-            
-            full_path.write_bytes(png_bytes)
-            
-            data_url = f"data:image/png;base64,{b64_data}"
-            return str(relative_path), data_url
+                raise ValueError("Rendered empty PNG bytes")
+            return base64.b64encode(png_bytes).decode('utf-8')
         except Exception as e:
-            log.error(f"[{self.game_id}] Failed to generate/save image: {e}")
-            return "ERROR_GENERATING_IMAGE", ""
+            log.error(f"[{self.game_id}] Failed to generate image: {e}")
+            return ""
+
+    def _build_turn_multimodal_content(self, turn: TurnData) -> List[Dict[str, Any]]:
+        """
+        Builds interleaved multimodal content for a single turn.
+        Returns a list of content items (text + images).
+        """
+        content = []
+        
+        # Turn header and action
+        header_text = f"### Turn {turn.turn_number}\n\n**Action:** `{turn.action_str}`\n\n"
+        
+        if turn.is_level_up:
+            header_text = f"> **⭐ LEVEL UP! A new level begins below.**\n>\n> {header_text}"
+        elif turn.is_game_over:
+            header_text = f"> **☠️ GAME OVER!**\n>\n> {header_text}"
+        
+        content.append({"type": "text", "text": header_text + "**State Before:**"})
+        
+        # Before image
+        before_b64 = self._grid_to_base64(turn.before_grid)
+        if before_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{before_b64}",
+                    "detail": self.IMAGE_DETAIL_LEVEL
+                }
+            })
+        else:
+            content.append({"type": "text", "text": "\n*(Image generation failed)*"})
+        
+        content.append({"type": "text", "text": "\n\n**State After:**"})
+        
+        # After image
+        after_b64 = self._grid_to_base64(turn.after_grid)
+        if after_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{after_b64}",
+                    "detail": self.IMAGE_DETAIL_LEVEL
+                }
+            })
+        else:
+            content.append({"type": "text", "text": "\n*(Image generation failed)*"})
+        
+        # Optional text diff
+        if self.INCLUDE_TEXT_DIFF:
+            content.append({
+                "type": "text",
+                "text": f"\n\n**Resulting Textual Diff:**\n```\n{turn.diff_str}\n```\n\n---\n\n"
+            })
+        else:
+            content.append({"type": "text", "text": "\n\n---\n\n"})
+        
+        return content
+
+    def _get_turns_within_context_limit(self) -> List[TurnData]:
+        """
+        Returns a subset of turn_history that fits within CONTEXT_LENGTH_LIMIT,
+        preserving high-information turns (level ups, game overs).
+        """
+        if self.CONTEXT_LENGTH_LIMIT == -1:
+            return self.turn_history  # No limit
+        
+        if not self.turn_history:
+            return []
+        
+        # Separate high-info vs regular turns
+        high_info_turns = []
+        regular_turns = []
+        
+        for turn in self.turn_history:
+            if turn.is_level_up or turn.is_game_over:
+                high_info_turns.append(turn)
+            else:
+                regular_turns.append(turn)
+        
+        # Estimate tokens per turn (rough heuristic: ~150 tokens per turn for text + images)
+        # Images with detail="low" are ~85 tokens each (OpenAI uses 85 tokens for low detail)
+        # So ~150 tokens text + 170 tokens for 2 images = ~320 tokens per turn
+        TOKENS_PER_TURN = 320
+        
+        max_turns = max(1, self.CONTEXT_LENGTH_LIMIT // TOKENS_PER_TURN)
+        
+        # Always include high-info turns
+        kept_turns = high_info_turns[:]
+        remaining_slots = max_turns - len(high_info_turns)
+        
+        if remaining_slots > 0 and regular_turns:
+            # Fill remaining slots with most recent regular turns
+            kept_turns.extend(regular_turns[-remaining_slots:])
+        
+        # Sort by turn number to maintain chronological order
+        kept_turns.sort(key=lambda t: t.turn_number)
+        
+        return kept_turns
+
+    def _build_full_history_multimodal_content(self) -> List[Dict[str, Any]]:
+        """
+        Builds complete interleaved multimodal content for all turns within context limit.
+        Returns a list ready to be included in user message content.
+        """
+        turns_to_include = self._get_turns_within_context_limit()
+        
+        if not turns_to_include:
+            return [{"type": "text", "text": "## Move History\n\n(No moves recorded yet.)\n\n"}]
+        
+        content = [{"type": "text", "text": "## Move History\n\n"}]
+        
+        for turn in turns_to_include:
+            content.extend(self._build_turn_multimodal_content(turn))
+        
+        return content
 
     def _initialize_memory(self, initial_frame: FrameData) -> None:
         """API Call 1 (Setup): Generates initial hypotheses using an image."""
@@ -99,21 +209,16 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         client = OpenAI()
         
         grid_3d = initial_frame.frame
-        
         grid = self._get_grid_from_frame(grid_3d)
-
-        # Generate the initial image
-        img_path, img_b64_url = self._generate_and_save_image(grid)
-        if not img_b64_url:
+        
+        img_b64 = self._grid_to_base64(grid)
+        if not img_b64:
             log.error(f"[{self.game_id}] Cannot initialize memory, image generation failed.")
             self.hypotheses_content = "## Hypotheses\n\n(ERROR: Initial image generation failed.)"
             self._is_initialized = True
             return
 
-        img_b64 = img_b64_url.split(",", 1)[1] # Get just the data
-
         sys_prompt = build_initial_hypotheses_system_prompt()
-        
         user_content = build_initial_hypotheses_user_content(self.game_id, img_b64, detail=self.IMAGE_DETAIL_LEVEL)
         
         resp = client.chat.completions.create(
@@ -123,41 +228,34 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
                 {"role": "user", "content": user_content}
             ],
             reasoning_effort=self.REASONING_EFFORT,
-
         )
         
         self.hypotheses_content = f"## Hypotheses\n\n{(resp.choices[0].message.content or '').strip()}"
         self._token_total += getattr(resp.usage, "total_tokens", 0)
         
-        # Add a note about the first image to the move history
-        self.move_history_content = (
-            "## Move History\n\n"
-            f"**Initial State (Image):**\n"
-            f"![Initial State]({img_path})\n\n"
-            "---\n\n"
-        )
+        # We don't need to store the initial state in turn_history since it's just setup
+        self.move_history_content = "## Move History\n\n"
         
-        self._write_memory() # Saves both hypotheses and history
+        self._write_memory()
         self._is_initialized = True
-        log.info(f"[{self.game_id}] Initial visual hypotheses generated and saved to {self.memory_file_path}")
+        log.info(f"[{self.game_id}] Initial visual hypotheses generated.")
 
     def _update_memory(self, prev_frame: FrameData, action: ActionInput, new_frame: FrameData) -> bool:
         """
-        Updates the memory file with the latest move (images + diff) and
-        revised hypotheses (using multimodal call).
+        Updates the memory with the latest move and revises hypotheses using
+        multimodal context (all past images + new images).
         """
         client = OpenAI()
         
         prev_grid_3d = prev_frame.frame
         new_grid_3d = new_frame.frame
         
-        
         prev_grid = self._get_grid_from_frame(prev_grid_3d)
         new_grid = self._get_grid_from_frame(new_grid_3d)
 
         state_hash = self._get_state_hash(prev_grid)
         
-        
+        # Build action identifier
         action_id_enum = action.id
         action_identifier = action_id_enum.name
         if action_id_enum == GameAction.ACTION6 and action.reasoning and "original_click" in action.reasoning:
@@ -169,100 +267,61 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
             x = action.data.get('x', '?')
             y = action.data.get('y', '?')
             action_identifier = f"{action_id_enum.name}(x={x}, y={y}) [mapped]"
-        
 
         state_action_tuple = (state_hash, action_identifier)
 
+        # Check for repeated state-action
         if state_action_tuple in self.seen_state_actions:
             log.warning(f"[{self.game_id}] Repeated state-action pair detected: {action_identifier}. Applying penalty.")
-            return True # Signal that this was a repeat
+            return True  # Signal that this was a repeat
 
         self.seen_state_actions.add(state_action_tuple)
 
         is_level_up = new_frame.score > prev_frame.score
         diff = self._calculate_diff(prev_grid, new_grid)
         
-        # Generate and save images for this step
-        prev_img_path, prev_img_b64_url = self._generate_and_save_image(prev_grid)
-        new_img_path, new_img_b64_url = self._generate_and_save_image(new_grid)
+        # Store this turn's data
+        turn_number = len(self.seen_state_actions)
+        turn_data = TurnData(
+            turn_number=turn_number,
+            action_str=action_identifier,
+            before_grid=prev_grid,
+            after_grid=new_grid,
+            diff_str=diff,
+            is_level_up=is_level_up,
+            is_game_over=(new_frame.state == GameState.GAME_OVER)
+        )
+        self.turn_history.append(turn_data)
+        
+        # Update text-based memory file (for disk persistence)
+        # This is kept for reference but the actual prompts use multimodal content
+        self._update_text_memory(turn_data)
 
-        # Build the text block for the markdown file
-        entry_header = f"### Turn {len(self.seen_state_actions)}\n\n"
-        
-        
-        entry_parts_list = [
-            f"**Action:** `{action_identifier}`\n\n",
-            "**State Before (Image):**\n",
-            f"![Before]({prev_img_path})\n\n",
-            "**State After (Image):**\n",
-            f"![After]({new_img_path})\n"
-        ]
-        
-        if self.INCLUDE_TEXT_DIFF:
-            entry_parts_list.extend([
-                "\n**Resulting Textual Diff:**\n",
-                "```\n",
-                f"{diff}\n",
-                "```\n"
-            ])
-        else:
-            entry_parts_list.append("\n\n")
-
-        entry_body = "".join(entry_parts_list)
-        
-        
-        if is_level_up:
-            history_entry = f"> **⭐ LEVEL UP! A new level begins below.**\n>\n{'> '.join((entry_header + entry_body).splitlines(True))}\n---\n\n"
-        elif new_frame.state == GameState.GAME_OVER:
-            history_entry = f"> **☠️ GAME OVER!**\n>\n{'> '.join((entry_header + entry_body).splitlines(True))}\n---\n\n"
-        else:
-            history_entry = f"{entry_header}{entry_body}\n---\n\n"
-
-        if "(No moves recorded yet.)" in self.move_history_content or "Initial State" in self.move_history_content:
-            # This logic is flawed, let's just append (to do)
-            self.move_history_content += history_entry
-        else:
-            self.move_history_content += history_entry
-            
-        # This is the multimodal content for the *last move only*
-        # We need the raw b64 data for the API call
-        prev_img_b64 = prev_img_b64_url.split(",", 1)[1] if prev_img_b64_url else ""
-        new_img_b64 = new_img_b64_url.split(",", 1)[1] if new_img_b64_url else ""
-        
-       
-        last_move_block_content = [
-            {"type": "text", "text": f"**Action:** `{action_identifier}`\n\n**State Before (Image):**"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{prev_img_b64}", "detail": self.IMAGE_DETAIL_LEVEL}},
-            {"type": "text", "text": "\n\n**State After (Image):**"},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{new_img_b64}", "detail": self.IMAGE_DETAIL_LEVEL}},
-        ]
-        
-        if self.INCLUDE_TEXT_DIFF:
-            last_move_block_content.append(
-                {"type": "text", "text": f"\n\n**Resulting Textual Diff:**\n```\n{diff}\n```\n"}
-            )
-        else:
-            last_move_block_content.append({"type": "text", "text": "\n\n"})
-      
-
-
-        log.info(f"[{self.game_id}] Updating hypotheses based on new visual move...")
+        # Build multimodal content for hypothesis update
+        log.info(f"[{self.game_id}] Updating hypotheses based on visual move history...")
         sys_prompt = build_update_hypotheses_system_prompt()
         
-        # Get the text-only history (which may be truncated by parent method)
-        text_memory_content = self._read_memory()
+        # Build user content: hypotheses text + full interleaved history
+        user_content = [
+            {"type": "text", "text": "Here is the game memory so far, including your prior hypotheses.\n\n"},
+            {"type": "text", "text": self.hypotheses_content + "\n\n"},
+        ]
         
-        user_content = build_update_hypotheses_user_content(text_memory_content, last_move_block_content)
-
+        # Add full interleaved history
+        user_content.extend(self._build_full_history_multimodal_content())
+        
         if is_level_up:
             special_instruction = (
                 "**IMPORTANT CONTEXT: A LEVEL UP just occurred.** The game board has changed for the new level. "
                 "Your primary task now is to **re-validate your current hypotheses against this new environment.** "
                 "Generate a new set of five hypotheses that reflect your understanding of this new level.\n\n"
             )
-            # Prepend the special instruction
             user_content.insert(0, {"type": "text", "text": special_instruction})
 
+        user_content.append({
+            "type": "text", 
+            "text": "\nAnalyze this evidence and provide an updated list of five refined hypotheses."
+        })
 
         resp = client.chat.completions.create(
             model=self.MODEL,
@@ -271,7 +330,6 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
                 {"role": "user", "content": user_content}
             ],
             reasoning_effort=self.REASONING_EFFORT,
-
         )
         self._token_total += getattr(resp.usage, "total_tokens", 0)
         
@@ -279,28 +337,63 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
         self.hypotheses_content = "## Hypotheses\n\n" + (new_hypotheses if new_hypotheses else self.hypotheses_content.split("\n\n", 1)[1])
         
         self._write_memory()
-        log.info(f"[{self.game_id}] Visual memory file updated.")
-        return False # Signal that this was not a repeat
+        log.info(f"[{self.game_id}] Visual memory and hypotheses updated.")
+        return False
+
+    def _update_text_memory(self, turn: TurnData) -> None:
+        """Updates the text-based memory file (for disk persistence)."""
+        entry_header = f"### Turn {turn.turn_number}\n\n"
+        entry_parts = [
+            f"**Action:** `{turn.action_str}`\n\n",
+            "**State Before (Image):** [Image stored]\n\n",
+            "**State After (Image):** [Image stored]\n",
+        ]
+        
+        if self.INCLUDE_TEXT_DIFF:
+            entry_parts.append(f"\n**Resulting Textual Diff:**\n```\n{turn.diff_str}\n```\n")
+        else:
+            entry_parts.append("\n")
+        
+        entry_body = "".join(entry_parts)
+        
+        if turn.is_level_up:
+            history_entry = f"> **⭐ LEVEL UP! A new level begins below.**\n>\n{'> '.join((entry_header + entry_body).splitlines(True))}\n---\n\n"
+        elif turn.is_game_over:
+            history_entry = f"> **☠️ GAME OVER!**\n>\n{'> '.join((entry_header + entry_body).splitlines(True))}\n---\n\n"
+        else:
+            history_entry = f"{entry_header}{entry_body}\n---\n\n"
+        
+        self.move_history_content += history_entry
 
     def _get_observation_text(self, memory_content: str, ds16_grid: List[List[int]], score: int, step: int) -> str:
         """
-        API Call 2: Calls the LLM with multimodal context to get a text observation.
-        Overrides parent method.
+        API Call 2: Calls the LLM with complete multimodal context (all past images + current image)
+        to get a text observation.
         """
         client = OpenAI()
         
-        # Generate the *current* state image
-        img_path, img_b64_url = self._generate_and_save_image(ds16_grid)
-        if not img_b64_url:
+        # Generate current state image
+        current_img_b64 = self._grid_to_base64(ds16_grid)
+        if not current_img_b64:
             log.error(f"[{self.game_id}] Cannot get observation, image generation failed.")
             return "ERROR: Could not generate current state image for observation."
-        
-        current_img_b64 = img_b64_url.split(",", 1)[1]
 
         sys_prompt = build_observation_system_prompt()
-        # memory_content already contains the markdown history (with image paths)
-       
-        user_content = build_observation_user_content(memory_content, current_img_b64, score, step, detail=self.IMAGE_DETAIL_LEVEL)
+        
+        # Build user content: status + current state + hypotheses + full history
+        user_content = [
+            {"type": "text", "text": f"**Current Game Status:**\n- Step: {step}\n- Score: {score}\n\n**Current Board State (Image):**"},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{current_img_b64}", "detail": self.IMAGE_DETAIL_LEVEL}},
+            {"type": "text", "text": "\n\n" + self.hypotheses_content + "\n\n"},
+        ]
+        
+        # Add full interleaved history (all past images + text)
+        user_content.extend(self._build_full_history_multimodal_content())
+        
+        user_content.append({
+            "type": "text",
+            "text": "\nFollow your reasoning process and provide a detailed text analysis, concluding with your recommended action. Be precise with all coordinates."
+        })
 
         resp = client.chat.completions.create(
             model=self.MODEL,
@@ -309,19 +402,16 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
                 {"role": "user", "content": user_content}
             ],
             reasoning_effort=self.REASONING_EFFORT,
-        
         )
         self._token_total += getattr(resp.usage, "total_tokens", 0)
         
         observation = (resp.choices[0].message.content or "No observation generated.").strip()
-        log.info(f"[{self.game_id} | Step {step}] Visual Observation Rationale: {observation}")
+        log.info(f"[{self.game_id} | Step {step}] Visual Observation Rationale generated.")
         return observation
     
     def choose_action(self, frames: list[FrameData], latest_frame: FrameData) -> GameAction:
         """
-        Main logic loop, identical to parent but calls the overridden (multimodal)
-        _initialize_memory and _update_memory, and the new
-        _get_observation_content.
+        Main logic loop. Calls the overridden multimodal methods.
         """
         was_repeated = False
         if not self._is_initialized:
@@ -335,12 +425,11 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
             log.info(f"[{self.game_id}] Game over detected. Returning RESET to try again.")
             return GameAction.RESET
 
-        memory_content = self._read_memory()
+        memory_content = self._read_memory()  # For logging/debugging
         grid_3d = latest_frame.frame
-        
         grid = self._get_grid_from_frame(grid_3d)
 
-        # Call our new multimodal observation function
+        # Get observation with full multimodal history
         observation_text = self._get_observation_text(memory_content, grid, latest_frame.score, len(frames))
         
         if was_repeated:
@@ -351,7 +440,7 @@ class AS66VisualMemoryAgent(AS66MemoryAgent):
             )
             observation_text = penalty_message + observation_text
         
-        # This function is inherited from the parent and works as-is (text-in, tool-out)
+        # This function is inherited and works as-is (text-in, tool-out)
         action, click_reasoning = self._select_action(observation_text, latest_frame)
         
         reasoning_data = {
