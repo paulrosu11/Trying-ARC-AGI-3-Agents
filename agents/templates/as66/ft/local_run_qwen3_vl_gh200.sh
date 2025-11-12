@@ -95,6 +95,6 @@ python evaluation/evaluate.py \
   --suite debug_suite \
   --num_runs 5 \
   --max_workers 5 \
-  --max_actions 300
+  --max_actions 5
 
 echo "[INFO] Evaluation finished."
