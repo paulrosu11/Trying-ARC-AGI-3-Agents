@@ -1,462 +1,338 @@
 import random
+from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple
 
-# CRITICAL: You MUST import this function to downsample the grid
 from agents.templates.as66.downsample import downsample_4x4, matrix16_to_lines
-
-Coord = Tuple[int, int]
 
 
 class GeneratedHeuristicAgent:
     """
-    Progressive-hardcoded + improved goal-chasing / hazard-avoiding agent.
+    Iteration 5 – Persistent tile tracking + sliding heuristic
 
-    - First: blindly executes the provided scripted sequence at the start of
-      each episode (PROGRESSIVE HARDCODING MODE).
+    Incremental improvements over Iteration 4:
 
-    - After the script:
-        * Downsamples the grid to 16x16.
-        * Infers the floor value (usually 15).
-        * Detects the controllable tile(s) by RARE value patterns among
-          {6, 8, 9, 10, 11} instead of treating all of them as players.
-        * Detects the goal/socket region from 0-valued cells.
-        * Simulates sliding moves toward the goal and scores directions by:
-              - must not slide through/onto hazard values (12/13),
-              - must change position (filter no-ops),
-              - reduce distance to goal,
-              - and keep a good distance from hazards (avoid standing next to
-                hazard clusters when possible).
-        * When no good direction is found, falls back to a mild
-          anti-hammering random exploration.
+    - Persistently tracks discovered controllable-tile values across turns:
+        * Once a tile value is detected by the rarity heuristic, we remember
+          it in `self.known_tile_values`.
+        * On subsequent turns we *first* search directly for these values in
+          the interior, even if their global frequency has changed due to
+          level transitions, hazards, or UI changes.
+    - Falls back to the earlier rarity-based detection when no known-value
+      tiles are visible, so new levels / new tile types can still be found.
+    - Keeps all previous improvements:
+        * Sliding simulator with toroidal wrap-around.
+        * Hazard avoidance (11, 12, 13 blocked).
+        * Basic stall/oscillation avoidance.
     """
 
     def __init__(self):
-        # Turn counter within current episode
         self.turn_count: int = 0
 
-        # REQUIRED: exact scripted sequence (progressive hardcoding mode)
-        self.scripted_moves: List[str] = [
-            "ACTION2", "ACTION3", "ACTION2", "ACTION3",
-            "ACTION3", "ACTION2", "ACTION3", "ACTION1",
-            "ACTION4", "ACTION2", "ACTION3", "ACTION3",
-            "ACTION3", "ACTION2", "ACTION3", "ACTION1",
-            "ACTION4", "ACTION2", "ACTION3", "ACTION1",
-            "ACTION3", "ACTION3", "ACTION2", "ACTION3",
-            "ACTION1", "ACTION4", "ACTION3", "ACTION3",
-            "ACTION3", "ACTION3", "ACTION2", "ACTION3",
-            "ACTION3", "ACTION3", "ACTION3", "ACTION3",
-            "ACTION3", "ACTION1", "ACTION4",
-        ]
+        # For stall detection
+        self.last_action: Optional[str] = None
+        self.last_tile_pos: Optional[Tuple[int, int]] = None
+        self.repeat_count: int = 0
 
-        # Last action and repetition tracking (for anti-hammering)
-        self.last_action_name: Optional[str] = None
-        self.last_action_repeat_count: int = 0
+        # Values that have been identified as controllable tiles within this
+        # episode (1–2 occurrences, not walls/UI/hazards/floor/goals).
+        self.known_tile_values: set[int] = set()
 
-        # RNG for post-script exploration
-        self.rng = random.Random(2026)
+    # ---------- Utility helpers on 16x16 grids ----------
 
-    # ---------------------------------------------------------------------
-    # Reset helpers
-    # ---------------------------------------------------------------------
-
-    def _reset_episode_state(self) -> None:
-        """Reset all state that should be cleared on RESET / new episode."""
-        self.turn_count = 0
-        self.last_action_name = None
-        self.last_action_repeat_count = 0
-
-    # ---------------------------------------------------------------------
-    # Grid analysis helpers
-    # ---------------------------------------------------------------------
-
-    def _infer_floor_value(self, grid: List[List[int]]) -> Optional[int]:
+    @staticmethod
+    def _find_floor_value(grid: List[List[int]]) -> int:
         """
-        Infer the dominant floor value from the interior of the grid.
-
-        - Prefer 15 if present; otherwise, take the most frequent interior value.
+        Estimate main floor value as the most frequent value
+        in a central window (to avoid borders/UI).
         """
-        if not grid or not grid[0]:
-            return None
-        n, m = len(grid), len(grid[0])
+        vals: List[int] = []
+        for r in range(2, 14):
+            for c in range(2, 14):
+                vals.append(grid[r][c])
+        if not vals:
+            flat = [v for row in grid for v in row]
+            return Counter(flat).most_common(1)[0][0]
+        return Counter(vals).most_common(1)[0][0]
 
-        counts: Dict[int, int] = {}
-        for r in range(1, n - 1):
-            for c in range(1, m - 1):
-                v = grid[r][c]
-                counts[v] = counts.get(v, 0) + 1
-
-        if not counts:
-            return None
-
-        if 15 in counts:
-            return 15
-        return max(counts.items(), key=lambda kv: kv[1])[0]
-
-    def _find_players_by_value(
-        self,
-        grid: List[List[int]],
-        floor_value: Optional[int],
-    ) -> List[Coord]:
+    @staticmethod
+    def _find_goal_cells(grid: List[List[int]]) -> List[Tuple[int, int]]:
         """
-        Detect controllable tile(s) by value, using a *rarity-based* heuristic.
-
-        - Candidate values: {6, 8, 9, 10, 11}.
-        - We count occurrences of each candidate in the interior.
-          Values that occur very frequently are likely UI / decorative,
-          while the true player pieces are usually rare small clusters.
-        - We select cells belonging to the *rarest* candidate value(s).
+        Identify potential goal-region cells as value 0 in interior.
         """
-        if not grid or not grid[0]:
-            return []
-        n, m = len(grid), len(grid[0])
-
-        candidate_values = {6, 8, 9, 10, 11}
-        counts: Dict[int, int] = {}
-
-        # First pass: count interior occurrences of candidate values
-        for r in range(1, n - 1):
-            for c in range(1, m - 1):
-                v = grid[r][c]
-                if v in candidate_values and v != floor_value:
-                    counts[v] = counts.get(v, 0) + 1
-
-        if not counts:
-            return []
-
-        # Find minimal frequency among candidates
-        min_count = min(counts.values())
-
-        # Allow a small band above min_count so we don't overfit to a single cell
-        # (if min_count is large, this still groups comparable frequencies).
-        rare_threshold = min_count + 1
-
-        rare_values = {v for v, cnt in counts.items() if cnt <= rare_threshold}
-        if not rare_values:
-            rare_values = set(counts.keys())
-
-        result: List[Coord] = []
-        for r in range(1, n - 1):
-            for c in range(1, m - 1):
-                v = grid[r][c]
-                if v in rare_values and v != floor_value:
-                    result.append((r, c))
-
-        return result
-
-    def _player_centroid(self, players: List[Coord], grid: List[List[int]]) -> Coord:
-        """
-        Get a single representative player position, as integer (row, col).
-        If no players given, fall back to rough board center.
-        """
-        n, m = len(grid), len(grid[0])
-        if not players:
-            return (n // 2, m // 2)
-
-        sr = sum(r for r, _ in players)
-        sc = sum(c for _, c in players)
-        cr = int(round(sr / len(players)))
-        cc = int(round(sc / len(players)))
-        cr = max(0, min(n - 1, cr))
-        cc = max(0, min(m - 1, cc))
-        return (cr, cc)
-
-    def _find_goal_centroid(self, grid: List[List[int]]) -> Optional[Tuple[float, float]]:
-        """
-        Approximate goal/socket location as centroid of all 0-valued interior cells.
-        If no zeros exist, return None.
-        """
-        if not grid or not grid[0]:
-            return None
-        n, m = len(grid), len(grid[0])
-
-        rows: List[int] = []
-        cols: List[int] = []
-        for r in range(1, n - 1):
-            for c in range(1, m - 1):
+        goals: List[Tuple[int, int]] = []
+        for r in range(2, 14):
+            for c in range(2, 14):
                 if grid[r][c] == 0:
-                    rows.append(r)
-                    cols.append(c)
+                    goals.append((r, c))
+        return goals
 
-        if not rows:
-            return None
-        return float(sum(rows)) / len(rows), float(sum(cols)) / len(cols)
+    @staticmethod
+    def _manhattan(a: Tuple[int, int], b: Tuple[int, int]) -> int:
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-    # ---------------------------------------------------------------------
-    # Movement & hazard modeling
-    # ---------------------------------------------------------------------
+    # ----- Tile detection helpers -----
 
-    def _is_hazard(self, v: int) -> bool:
-        """
-        Treat canonical hazard body/eye values 12 and 13 as lethal.
-        """
-        return v in (12, 13)
-
-    def _collect_hazard_cells(self, grid: List[List[int]]) -> List[Coord]:
-        """Return list of hazard cell coordinates in the interior."""
-        if not grid or not grid[0]:
-            return []
-        n, m = len(grid), len(grid[0])
-        hazards: List[Coord] = []
-        for r in range(1, n - 1):
-            for c in range(1, m - 1):
-                if self._is_hazard(grid[r][c]):
-                    hazards.append((r, c))
-        return hazards
-
-    def _nearest_hazard_distance_sq(
-        self,
-        pos: Coord,
-        hazards: List[Coord],
-    ) -> int:
-        """
-        Squared distance to the nearest hazard cell.
-        If no hazards, return a large number (effectively "safe").
-        """
-        if not hazards:
-            return 10_000  # bigger than any possible 16x16 distance^2
-        pr, pc = pos
-        best = 10_000
-        for hr, hc in hazards:
-            d2 = (hr - pr) ** 2 + (hc - pc) ** 2
-            if d2 < best:
-                best = d2
-        return best
-
-    def _simulate_slide(
+    def _find_tiles_by_known_values(
         self,
         grid: List[List[int]],
-        start: Coord,
-        direction: str,
-        floor_value: Optional[int],
-    ) -> Tuple[Coord, bool]:
+    ) -> List[Tuple[int, int, int]]:
         """
-        Simulate sliding from `start` in `direction` on the 16x16 grid.
+        First-pass tile detection: look explicitly for any cell in the interior
+        whose value is one of the remembered `known_tile_values`.
 
-        Traversable values:
-          - floor_value,
-          - floor_value ± 1,
-          - 0 (goal area, U-shapes).
-
-        Blocking:
-          - anything not traversable and not hazard.
-
-        Hazard:
-          - cells with values 12 or 13 are lethal. We mark the move as hazardous
-            if we would enter such a cell while sliding.
-
-        Returns:
-            (end_coord, hit_hazard)
+        Returns list of (row, col, value).
         """
-        if not grid or not grid[0]:
-            return start, False
+        if not self.known_tile_values:
+            return []
 
-        n, m = len(grid), len(grid[0])
+        tiles: List[Tuple[int, int, int]] = []
+        for r in range(2, 14):
+            for c in range(2, 14):
+                v = grid[r][c]
+                if v in self.known_tile_values:
+                    tiles.append((r, c, v))
+        return tiles
+
+    def _find_controllable_tiles_by_rarity(
+        self,
+        grid: List[List[int]],
+        floor_val: int,
+    ) -> List[Tuple[int, int, int]]:
+        """
+        Second-pass (fallback) tile detection using rarity.
+
+        Heuristic:
+        - Ignore clearly non-playable / UI / wall / hazard values.
+        - Among remaining interior cells, look for values that appear only a
+          small number of times (1–2). These are likely player tiles.
+        Returns list of (row, col, value).
+        """
+        # Values we consider *not* tiles:
+        # - 0: goal region
+        # - floor_val: main floor
+        # - 1,3,4,5,6,7,14: borders, walls, UI bars
+        # - 11,12,13: hazards (eye/body variants)
+        non_tile_vals = {0, floor_val, 1, 3, 4, 5, 6, 7, 11, 12, 13, 14}
+
+        counts: Counter = Counter()
+        coords_by_val: Dict[int, List[Tuple[int, int]]] = {}
+
+        for r in range(2, 14):
+            for c in range(2, 14):
+                v = grid[r][c]
+                if v in non_tile_vals:
+                    continue
+                counts[v] += 1
+                coords_by_val.setdefault(v, []).append((r, c))
+
+        tiles: List[Tuple[int, int, int]] = []
+        for v, cnt in counts.items():
+            # We expect 1–2 occurrences per tile type; higher counts are
+            # probably decorative regions, hazards, or part of goals.
+            if 1 <= cnt <= 2:
+                for (r, c) in coords_by_val[v]:
+                    tiles.append((r, c, v))
+
+        # Update persistent knowledge of tile values
+        for _, _, v in tiles:
+            self.known_tile_values.add(v)
+
+        return tiles
+
+    @staticmethod
+    def _build_traversable_mask(
+        grid: List[List[int]],
+        floor_val: int,
+    ) -> List[List[bool]]:
+        """
+        Traversable cells: main floor and goal region (0).
+        Hazards and walls are treated as non-traversable.
+        """
+        rows = len(grid)
+        cols = len(grid[0]) if rows else 0
+        traversable: List[List[bool]] = [[False] * cols for _ in range(rows)]
+
+        # Values we explicitly disallow walking through:
+        # walls/UI: 1,3,4,5,6,7,14
+        # hazards (eye + body): 11,12,13
+        blocked = {1, 3, 4, 5, 6, 7, 11, 12, 13, 14}
+
+        for r in range(rows):
+            for c in range(cols):
+                v = grid[r][c]
+                if v in blocked:
+                    traversable[r][c] = False
+                elif v == floor_val or v == 0:
+                    traversable[r][c] = True
+                else:
+                    # Other interior values (possible tiles) are *not*
+                    # traversable for sliding purposes (they block).
+                    traversable[r][c] = False
+
+        return traversable
+
+    @staticmethod
+    def _simulate_slide(
+        start: Tuple[int, int],
+        direction: Tuple[int, int],
+        traversable: List[List[bool]],
+    ) -> Tuple[int, int]:
+        """
+        Simulate AS66-style sliding with toroidal wrap-around.
+
+        - Slides along the given direction over traversable cells.
+        - Stops just before a non-traversable cell (wall, other tile, hazard).
+        - Wraps around edges (toroidal).
+        - If after a full wrap-around there is no blocking obstacle at all
+          on that line, returns the original position (no-op).
+        """
+        rows = len(traversable)
+        cols = len(traversable[0]) if rows else 0
         r, c = start
-
-        if direction == "ACTION1":   # up
-            dr, dc = -1, 0
-        elif direction == "ACTION2":  # down
-            dr, dc = 1, 0
-        elif direction == "ACTION3":  # left
-            dr, dc = 0, -1
-        elif direction == "ACTION4":  # right
-            dr, dc = 0, 1
-        else:
-            return start, False
-
-        traversable: set = {0}
-        if floor_value is not None:
-            traversable.add(floor_value)
-            traversable.add(max(0, floor_value - 1))
-            traversable.add(floor_value + 1)
-
-        cur_r, cur_c = r, c
-        hit_hazard = False
+        dr, dc = direction
+        steps = 0
 
         while True:
-            nr, nc = cur_r + dr, cur_c + dc
-            if nr < 0 or nr >= n or nc < 0 or nc >= m:
+            nr = (r + dr) % rows
+            nc = (c + dc) % cols
+            if not traversable[nr][nc]:
+                # Next cell is non-traversable -> stop before it
                 break
+            r, c = nr, nc
+            steps += 1
+            if steps > max(rows, cols):
+                # Pure wrap-around with no blocker -> treated as no-op
+                return start
+        return (r, c)
 
-            v = grid[nr][nc]
-
-            if self._is_hazard(v):
-                hit_hazard = True
-                cur_r, cur_c = nr, nc
-                break
-
-            if v in traversable:
-                cur_r, cur_c = nr, nc
-                continue
-
-            # Non-traversable, non-hazard -> blocking obstacle; stop before it.
-            break
-
-        return (cur_r, cur_c), hit_hazard
-
-    def _choose_goal_directed_action(
-        self,
-        grid: List[List[int]],
-        player_pos: Coord,
-        goal_pos: Tuple[float, float],
-        floor_value: Optional[int],
-        hazards: List[Coord],
-    ) -> Optional[str]:
-        """
-        Choose a direction that:
-          - does not slide into a hazard,
-          - actually changes the player's position,
-          - reduces squared distance to the goal centroid,
-          - and prefers standing farther from hazards (maximize distance).
-
-        If no direction both moves and avoids hazards, falls back to any
-        non-hazard move that changes position. Returns None if nothing seems
-        useful.
-        """
-        pr, pc = player_pos
-        tr, tc = goal_pos
-        base_dirs = ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]
-
-        # Prioritize directions based on relative offset to goal
-        dr = tr - pr
-        dc = tc - pc
-        dirs_priority: List[str] = []
-
-        if abs(dr) >= abs(dc):
-            dirs_priority.append("ACTION1" if dr < 0 else "ACTION2")
-            dirs_priority.append("ACTION3" if dc < 0 else "ACTION4")
-        else:
-            dirs_priority.append("ACTION3" if dc < 0 else "ACTION4")
-            dirs_priority.append("ACTION1" if dr < 0 else "ACTION2")
-
-        for d in base_dirs:
-            if d not in dirs_priority:
-                dirs_priority.append(d)
-
-        best_candidates: List[Tuple[float, float, str]] = []
-
-        for d in dirs_priority:
-            end_pos, hazard = self._simulate_slide(grid, player_pos, d, floor_value)
-            if hazard:
-                continue
-            if end_pos == player_pos:
-                continue
-            er, ec = end_pos
-            dist2_goal = (er - tr) ** 2 + (ec - tc) ** 2
-            dist2_hazard = self._nearest_hazard_distance_sq(end_pos, hazards)
-            # We want to MINIMIZE dist2_goal and MAXIMIZE dist2_hazard,
-            # so we use (dist2_goal, -dist2_hazard) as sort key.
-            best_candidates.append((dist2_goal, -dist2_hazard, d))
-
-        if best_candidates:
-            best_candidates.sort(key=lambda x: (x[0], x[1]))
-            # Prefer not to repeat the exact same action if possible
-            for _, _, d in best_candidates:
-                if d != self.last_action_name:
-                    return d
-            return best_candidates[0][2]
-
-        # If everything was no-op or hazardous, attempt any non-hazard move
-        safe_nonnoop: List[str] = []
-        for d in dirs_priority:
-            end_pos, hazard = self._simulate_slide(grid, player_pos, d, floor_value)
-            if not hazard and end_pos != player_pos:
-                safe_nonnoop.append(d)
-
-        if safe_nonnoop:
-            for d in safe_nonnoop:
-                if d != self.last_action_name:
-                    return d
-            return safe_nonnoop[0]
-
-        return None
-
-    def _pick_exploratory_action(self) -> str:
-        """
-        Simple exploratory policy:
-        - Uniformly random among 4 directions.
-        - Avoid repeating the same direction too many times in a row.
-        """
-        directions = ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]
-
-        # If we've repeated the same move 3+ times, force a different one.
-        if self.last_action_name is not None and self.last_action_repeat_count >= 3:
-            alternatives = [d for d in directions if d != self.last_action_name]
-            return self.rng.choice(alternatives)
-
-        # Otherwise, random with slight bias against immediate repeat.
-        if self.last_action_name is not None and self.rng.random() < 0.75:
-            alternatives = [d for d in directions if d != self.last_action_name]
-            return self.rng.choice(alternatives)
-
-        return self.rng.choice(directions)
-
-    # ---------------------------------------------------------------------
-    # Main API
-    # ---------------------------------------------------------------------
+    # ---------- Main decision function ----------
 
     def choose_action(self, frame_data: dict) -> dict:
-        # 1. Handle terminal / not-started states
+        # 1. Handle game state / episode reset
         current_state = frame_data.get("state", "NOT_PLAYED")
-
         if current_state in ("GAME_OVER", "NOT_PLAYED"):
-            # Reset per the spec, and clear our internal episode state
-            self._reset_episode_state()
+            self.turn_count = 0
+            self.last_action = None
+            self.last_tile_pos = None
+            self.repeat_count = 0
+            self.known_tile_values.clear()
             return {"name": "RESET", "data": {}}
 
-        # 2. Progressive hardcoded script – execute blindly at the start
-        if self.turn_count < len(self.scripted_moves):
-            action_name = self.scripted_moves[self.turn_count]
-            self.turn_count += 1
-        else:
-            # 3. Heuristic / goal-chasing mode after the script
-            full_frame_3d = frame_data.get("frame", [])
-            if not full_frame_3d:
-                # No frame available: fall back to exploration
-                action_name = self._pick_exploratory_action()
-                self.turn_count += 1
+        self.turn_count += 1
+
+        # 2. Downsample 64x64 -> 16x16
+        full_frame_3d = frame_data.get("frame", [])
+        if not full_frame_3d:
+            return {
+                "name": random.choice(["ACTION1", "ACTION2", "ACTION3", "ACTION4"]),
+                "data": {},
+            }
+
+        try:
+            grid16 = downsample_4x4(
+                full_frame_3d, take_last_grid=True, round_to_int=True
+            )
+        except Exception:
+            # If we can't see the board, at least keep moving
+            return {
+                "name": random.choice(["ACTION1", "ACTION2", "ACTION3", "ACTION4"]),
+                "data": {},
+            }
+
+        # 3. Infer floor, goals, and controllable tiles
+        floor_val = self._find_floor_value(grid16)
+        goals = self._find_goal_cells(grid16)
+        traversable = self._build_traversable_mask(grid16, floor_val)
+
+        # 3a. Try to find tiles by previously known-value first
+        tiles = self._find_tiles_by_known_values(grid16)
+
+        # 3b. If none found, fall back to rarity-based discovery
+        if not tiles:
+            tiles = self._find_controllable_tiles_by_rarity(grid16, floor_val)
+
+        if not tiles:
+            # No visible controllable tiles – either level is in transition
+            # or our detection failed. Use mild exploration to avoid
+            # pathological oscillation but keep acting.
+            cycle = ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]
+            if self.last_action in cycle:
+                idx = (cycle.index(self.last_action) + 1) % 4
+                action_name = cycle[idx]
             else:
-                try:
-                    grid = downsample_4x4(
-                        full_frame_3d,
-                        take_last_grid=True,
-                        round_to_int=True,
-                    )
-                except Exception:
-                    grid = None
+                action_name = random.choice(cycle)
+            self.last_action = action_name
+            self.last_tile_pos = None
+            self.repeat_count = 0
+            return {"name": action_name, "data": {}}
 
-                if grid is None:
-                    action_name = self._pick_exploratory_action()
-                    self.turn_count += 1
-                else:
-                    floor_value = self._infer_floor_value(grid)
-                    players = self._find_players_by_value(grid, floor_value)
-                    player_pos = self._player_centroid(players, grid)
-                    goal_centroid = self._find_goal_centroid(grid)
-                    hazards = self._collect_hazard_cells(grid)
+        # Use first detected tile as primary (most levels start with 1 tile)
+        tile_r, tile_c, _ = tiles[0]
+        tile_pos = (tile_r, tile_c)
 
-                    chosen: Optional[str] = None
-                    if goal_centroid is not None:
-                        chosen = self._choose_goal_directed_action(
-                            grid,
-                            player_pos,
-                            goal_centroid,
-                            floor_value,
-                            hazards,
-                        )
+        if not goals:
+            # No clear goals; just explore in a gentle cycle
+            cycle = ["ACTION1", "ACTION2", "ACTION3", "ACTION4"]
+            if self.last_action in cycle:
+                idx = (cycle.index(self.last_action) + 1) % 4
+                action_name = cycle[idx]
+            else:
+                action_name = random.choice(cycle)
+            self.last_action = action_name
+            self.last_tile_pos = tile_pos
+            self.repeat_count = 0
+            return {"name": action_name, "data": {}}
 
-                    if chosen is None:
-                        action_name = self._pick_exploratory_action()
-                    else:
-                        action_name = chosen
+        # 4. Choose direction that best reduces distance to nearest goal
+        nearest_goal = min(goals, key=lambda g: self._manhattan(tile_pos, g))
+        base_dist = self._manhattan(tile_pos, nearest_goal)
 
-                    self.turn_count += 1
+        directions = {
+            "ACTION1": (-1, 0),  # up
+            "ACTION2": (1, 0),   # down
+            "ACTION3": (0, -1),  # left
+            "ACTION4": (0, 1),   # right
+        }
 
-        # Update anti-hammering counters
-        if action_name == self.last_action_name:
-            self.last_action_repeat_count += 1
+        best_actions: List[str] = []
+        best_dist = base_dist
+
+        # Stall-avoidance: if we keep repeating the same action without
+        # effective movement, temporarily forbid that action.
+        forbidden_action: Optional[str] = None
+        if self.repeat_count >= 4 and self.last_action in directions:
+            forbidden_action = self.last_action
+
+        for action_name, (dr, dc) in directions.items():
+            if action_name == forbidden_action:
+                continue
+
+            end_pos = self._simulate_slide(tile_pos, (dr, dc), traversable)
+            new_dist = self._manhattan(end_pos, nearest_goal)
+
+            if new_dist < best_dist:
+                best_dist = new_dist
+                best_actions = [action_name]
+            elif new_dist == best_dist:
+                best_actions.append(action_name)
+
+        if best_actions:
+            chosen = random.choice(best_actions)
         else:
-            self.last_action_repeat_count = 1
-            self.last_action_name = action_name
+            # No direction improves distance (or all were forbidden);
+            # choose any non-forbidden direction.
+            candidate_actions = list(directions.keys())
+            if forbidden_action in candidate_actions and len(candidate_actions) > 1:
+                candidate_actions.remove(forbidden_action)
+            chosen = random.choice(candidate_actions)
 
-        return {"name": action_name, "data": {}}
+        # 5. Update stall tracking
+        end_pos = self._simulate_slide(tile_pos, directions[chosen], traversable)
+        if self.last_tile_pos == end_pos and self.last_action == chosen:
+            self.repeat_count += 1
+        else:
+            self.repeat_count = 0
+        self.last_tile_pos = end_pos
+        self.last_action = chosen
+
+        return {"name": chosen, "data": {}}

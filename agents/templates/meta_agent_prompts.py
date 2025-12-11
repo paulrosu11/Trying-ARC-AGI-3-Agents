@@ -278,34 +278,121 @@ You will be shown a history of previous iterations.
 Use this feedback to improve your agent's logic. For example, if you see many repeated "no-op" actions in the log, add logic to avoid them. If you see `GAME_OVER`, analyze the state and add logic to avoid that state. **you are allowed to (and encouraged to) hardcode moves that seem to have worked**. Make no errors in your code and remember you have plenty of compute.!>
 """)
 
+PROMPT_GENERAL_ARC_RULES = textwrap.dedent("""
+# Game Rules: General ARC-AGI-3 Environment
 
+You are designing an agent to play a grid-based puzzle game.
+Your goal is to infer the mechanics and objective of the game through trial and error, and write code to solve it.
+
+## The Environment
+- **Grid:** You receive a 2D grid of integers (0-15). Each integer represents a color/object type.
+- **Actions:**
+  - `ACTION1` (Up), `ACTION2` (Down), `ACTION3` (Left), `ACTION4` (Right).
+  - `ACTION6` (Click at x,y): Some games require clicking specific tiles.
+  - `RESET`: Restarts the level. Use this if you get stuck or hit GAME_OVER.
+
+## Your Strategy
+1.  **Explore:** In early iterations, try different actions to see how the grid changes.
+2.  **Infer:** Identify the player character (what moves?), obstacles (what blocks?), and goals (what increases score?).
+3.  **Optimize:** Write logic to navigate towards the goal efficiently.
+
+## Win Conditions
+- You usually need to reach a specific state or object.
+- **Score:** The score increases when you complete a level.
+- **GAME_OVER:** Occurs if you hit a hazard or run out of resources.
+""")# --- 3. SYSTEM INSTRUCTIONS (16x16 vs 64x64) ---
+
+PROMPT_SYSTEM_INSTRUCTION_16 = textwrap.dedent("""
+You are an expert AI Agent Designer. Your task is to iteratively write Python code for a "heuristic agent" to play a game.
+
+Your goal is to write code that plays the game *better* than the previous iteration.
+
+---
+### 1. Your Task: Write Python Code
+You must write a complete, self-contained Python script. 
+Your script **MUST** define the following class:
+
+```python
+import random
+from typing import Any, Dict, List, Optional
+# CRITICAL: You MUST import this function to downsample the grid
+from agents.templates.as66.downsample import downsample_4x4, matrix16_to_lines
+
+class GeneratedHeuristicAgent:
+    def __init__(self):
+        self.turn_count = 0
+        pass
+
+    def choose_action(self, frame_data: dict) -> dict:
+        # 1. Handle Game State
+        current_state = frame_data.get('state', 'NOT_PLAYED')
+        if current_state in ("GAME_OVER", "NOT_PLAYED"):
+            return {'name': 'RESET', 'data': {}}
+            
+        # 2. Downsample the Grid (CRITICAL STEP)
+        # The agent MUST operate on the 16x16 downsampled grid.
+        full_frame_3d = frame_data.get('frame', [])
+        if not full_frame_3d:
+            return {'name': 'ACTION5', 'data': {}}
+            
+        grid_16x16 = downsample_4x4(full_frame_3d, take_last_grid=True, round_to_int=True)
+        
+        # 3. YOUR LOGIC HERE (Use grid_16x16)
+        
+        return {'name': 'ACTION1', 'data': {}}
+""")
+
+PROMPT_SYSTEM_INSTRUCTION_64 = textwrap.dedent("""
+You are an expert AI Agent Designer. Your task is to iteratively write Python code for a "heuristic agent" to play a game.
+Your goal is to write code that plays the game better than the previous iteration.
+1. Your Task: Write Python Code
+You must write a complete, self-contained Python script.
+Your script MUST define the following class:
+Python
+
+import randomfrom typing import Any, Dict, List, Optionalclass GeneratedHeuristicAgent:
+    def __init__(self):
+        self.turn_count = 0
+        pass
+
+    def choose_action(self, frame_data: dict) -> dict:
+        # 1. Handle Game State
+        current_state = frame_data.get('state', 'NOT_PLAYED')
+        if current_state in ("GAME_OVER", "NOT_PLAYED"):
+            return {'name': 'RESET', 'data': {}}
+            
+        # 2. Process Raw Grid (64x64)
+        # You are operating on the full resolution grid.
+        # frame_data['frame'] is a list of 2D grids (layers). Usually take the last one.
+        full_frame_3d = frame_data.get('frame', [])
+        if not full_frame_3d:
+            return {'name': 'ACTION5', 'data': {}}
+            
+        grid = full_frame_3d[-1] # 64x64 grid
+        
+        # 3. YOUR LOGIC HERE (Use the 64x64 grid)
+        
+        return {'name': 'ACTION1', 'data': {}}
+""")
 PROMPT_PROGRESSIVE_INSTRUCTION = textwrap.dedent("""
-### 5. PROGRESSIVE HARDCODING MODE (IMPORTANT)
-
-We have found a specific sequence of actions that solves previous levels. You **MUST** hardcode this sequence into your agent to ensure it reaches the new frontier (the highest unsolved level) consistently.
-
-**INSTRUCTIONS:**
-1.  In your `__init__`, create a list `self.scripted_moves` containing the actions provided below.
-2.  In `choose_action`, check if `self.turn_count` (or your index tracker) is less than the length of `self.scripted_moves`.
-3.  If it is, **blindly return** the scripted action for that turn.
-4.  Once the scripted moves are exhausted, switch to your dynamic/heuristic/trained logic to solve the *next* level.
-
-**HARDCODED MOVES (Valid Level-Solving Sequence):**
+5. PROGRESSIVE HARDCODING MODE (IMPORTANT)
+We have found a specific sequence of actions that solves previous levels. You MUST hardcode this sequence into your agent to ensure it reaches the new frontier (the highest unsolved level) consistently.
+INSTRUCTIONS:
+In your __init__, create a list self.scripted_moves containing the actions provided below.
+In choose_action, check if self.turn_count (or your index tracker) is less than the length of self.scripted_moves.
+If it is, blindly return the scripted action for that turn.
+Once the scripted moves are exhausted, switch to your dynamic/heuristic/trained logic to solve the nextlevel.
+HARDCODED MOVES (Valid Level-Solving Sequence):
 """)
 
 PROMPT_CONDENSER_SYSTEM = textwrap.dedent("""
 You are an expert log analyst. You are viewing a raw execution log of an agent playing a grid game.
 The agent successfully reached a higher level (Score Increased).
-
-**YOUR TASK:**
-Identify the *minimal* sequence of actions that actually contributed to this success.
-1.  Filter out "no-op" moves (actions that resulted in the exact same state hash).
-2.  Filter out repetitive loops that didn't change the state .
-3.  Extract the clean sequence of actions from the start of the episode up to the moment the score increased/level changed.
-4. **Respond well to feedback and iterate carefully and smartly**. Really be careful to find a sequence of actions from the starting point till a score increase (or more!)
-
-**OUTPUT FORMAT:**
+YOUR TASK:
+Identify the minimal sequence of actions that actually contributed to this success.
+Filter out "no-op" moves.
+Extract the clean sequence of actions from the start of the episode up to the moment the score increased.
+OUTPUT FORMAT:
 Return ONLY a valid JSON list of strings.
-Example: `["ACTION1", "ACTION2", "ACTION3", "ACTION1"]`
-Do not include markdown formatting or explanations. Just the JSON list. **really be careful and think through this, above all else get to the state action pair which increased the score. **Correctness first then brevity**. 
+Example: ["ACTION1", "ACTION2", "ACTION3", "ACTION1"]
 """)
