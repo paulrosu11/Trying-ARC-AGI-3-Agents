@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=eval-GWEN-VL-low-noDiff-noDS-px4-ctx50k-highDetail
+#SBATCH --job-name=eval-gpt-5-low-noDiff-ctx50k-detailAuto-cell16
 #SBATCH --partition=compsci-gpu         
 #SBATCH --cpus-per-task=16          
 #SBATCH --mem=64G                    
@@ -44,21 +44,21 @@ fi
 echo "[INFO] Setting Environment Variables for Ablation..."
 
 # Assumes your server (from Script 1) is running on localhost:8009
-export OPENAI_BASE_URL="http://localhost:8009/v1" 
-export OPENAI_API_KEY="EMPTY"
-export AGENT_MODEL_OVERRIDE="qwen3-vl-4b-thinking" # "gpt-5"
+#export OPENAI_BASE_URL="http://localhost:8009/v1" 
+#export OPENAI_API_KEY="EMPTY"
+export AGENT_MODEL_OVERRIDE="gpt-5-nano" #"qwen3-vl-4b-thinking" # "gpt-5"
 
 
 # These variables will be read by the as66visualmemoryagent
 export AGENT_REASONING_EFFORT="low"
 export INCLUDE_TEXT_DIFF="false"
 export CONTEXT_LENGTH_LIMIT="50000"
-export DOWNSAMPLE_IMAGES="false"
-export IMAGE_DETAIL_LEVEL="high"
-export IMAGE_PIXELS_PER_CELL="4"
+export DOWNSAMPLE_IMAGES="true"
+export IMAGE_DETAIL_LEVEL="auto"
+export IMAGE_PIXELS_PER_CELL="16"
 
 
-echo "  OPENAI_BASE_URL=$OPENAI_BASE_URL"
+#echo "  OPENAI_BASE_URL=$OPENAI_BASE_URL"
 echo "  AGENT_MODEL_OVERRIDE=$AGENT_MODEL_OVERRIDE"
 echo "  AGENT_REASONING_EFFORT=$AGENT_REASONING_EFFORT"
 echo "  INCLUDE_TEXT_DIFF=$INCLUDE_TEXT_DIFF"
@@ -71,9 +71,9 @@ echo "  IMAGE_PIXELS_PER_CELL=$IMAGE_PIXELS_PER_CELL"
 echo "[INFO] Starting evaluation command..."
 uv run evaluation/evaluate.py \
     --agent as66visualmemoryagent \
-    --suite standard_suite \
+    --suite debug_suite \
     --num_runs 5 \
-    --max_workers 30 \
-    --max_actions 300
+    --max_workers 5 \
+    --max_actions 3
 
 echo "[INFO] Evaluation command finished."
